@@ -89,6 +89,7 @@ function createPersistenceScheduler(options = {}) {
       do {
         pendingForce = false;
         const writeGeneration = mutationGeneration;
+        dirty = false;
         write();
         lastSuccessfulWriteAt = now();
         dirty = mutationGeneration !== writeGeneration;
@@ -138,6 +139,17 @@ function createPersistenceScheduler(options = {}) {
     attemptWrite();
   }
 
+  function flushPending() {
+    if (stopped) throw new Error(STOPPED_ERROR_MESSAGE);
+    if (!dirty) return;
+    clearScheduledTimer();
+    if (writeInProgress) {
+      pendingForce = true;
+      return;
+    }
+    attemptWrite();
+  }
+
   function stop() {
     if (stopped) return;
     stopped = true;
@@ -145,7 +157,7 @@ function createPersistenceScheduler(options = {}) {
     if (dirty && !writeInProgress) attemptWrite();
   }
 
-  return { flush, markDirty, stop };
+  return { flush, flushPending, markDirty, stop };
 }
 
 module.exports = {

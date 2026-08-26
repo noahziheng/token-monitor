@@ -9,6 +9,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const { createHub, resolveBindHost } = require('../../src/hub/server');
+const { HUB_PERSIST_RETRY_DELAY_MS } = require('../../src/hub/persistenceScheduler');
 const { codexAccountKey } = require('../../src/shared/codexAuth');
 
 function tempDataFile() {
@@ -343,6 +344,110 @@ test('stop rejects a failed final flush after closing the server', async () => {
   } finally {
     fs.rmSync(blocker, { recursive: true, force: true });
     if (hub.server.listening) await hub.stop();
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('stop memoizes concurrent and repeated calls through a failed final flush', async () => {
+  const dataFile = tempDataFile();
+  const errors = [];
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error(error) { errors.push(error); } }
+  });
+  const blocker = `${dataFile}.tmp`;
+  const settle = (promise) => promise.then(
+    (value) => ({ status: 'fulfilled', value }),
+    (reason) => ({ reason, status: 'rejected' })
+  );
+  await hub.start();
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    hub.ingest(usagePayload('dev-a', 9));
+    fs.mkdirSync(blocker);
+
+    const first = hub.stop();
+    const second = hub.stop();
+    const [firstResult, secondResult] = await Promise.all([settle(first), settle(second)]);
+
+    assert.strictEqual(second, first);
+    assert.equal(firstResult.status, 'rejected');
+    assert.equal(secondResult.status, 'rejected');
+    assert.strictEqual(secondResult.reason, firstResult.reason);
+    assert.strictEqual(hub.stop(), first);
+    assert.equal(errors.length, 1);
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+    assert.equal(hub.server.listening, false);
+  } finally {
+    fs.rmSync(blocker, { recursive: true, force: true });
+    if (hub.server.listening) await hub.stop().catch(() => {});
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('stop synchronously preflushes pending ingest state for fire-and-forget callers', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() {} }
+  });
+  let stopPromise;
+  await hub.start();
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    hub.ingest(usagePayload('dev-a', 9));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+
+    stopPromise = hub.stop();
+
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 9);
+    await stopPromise;
+  } finally {
+    if (stopPromise) await stopPromise.catch(() => {});
+    if (hub.server.listening) await hub.stop();
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('a throwing logger cannot replace the final persistence rejection', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() { throw new Error('logger exploded'); } }
+  });
+  const blocker = `${dataFile}.tmp`;
+  await hub.start();
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    hub.ingest(usagePayload('dev-a', 9));
+    fs.mkdirSync(blocker);
+
+    await assert.rejects(hub.stop(), (error) => {
+      assert.notEqual(error.message, 'logger exploded');
+      assert.match(error.message, /tm-hub-test/);
+      return true;
+    });
+
+    assert.equal(hub.server.listening, false);
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+  } finally {
+    fs.rmSync(blocker, { recursive: true, force: true });
+    if (hub.server.listening) await hub.stop().catch(() => {});
     flushForCleanup(hub);
     cleanupDataFile(dataFile);
   }
@@ -688,7 +793,12 @@ test('a subscription write that cannot reach disk does not take effect in memory
     // And the file still agrees, so a restart lands on the same list.
     assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')).subscriptions.subscriptions.map((e) => e.id), ['a']);
   } finally {
-    fs.rmSync(dataFile, { force: true });
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+    await new Promise((resolve) => setTimeout(resolve, HUB_PERSIST_RETRY_DELAY_MS + 50));
+    const recreatedAfterRetry = fs.existsSync(dataFile);
+    cleanupDataFile(dataFile);
+    assert.equal(recreatedAfterRetry, false);
   }
 });
 

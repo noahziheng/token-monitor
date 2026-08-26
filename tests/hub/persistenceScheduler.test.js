@@ -231,6 +231,84 @@ test('flush writes unconditionally when the scheduler is clean', () => {
   assert.equal(clock.timerCount(), 0);
 });
 
+test('flushPending does not force a clean write', () => {
+  const clock = createManualClock();
+  let writes = 0;
+  const scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => { writes += 1; }
+  }));
+
+  scheduler.flushPending();
+  assert.equal(writes, 0);
+
+  scheduler.markDirty();
+  scheduler.flushPending();
+
+  assert.equal(writes, 1);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('flushPending synchronously drains dirty state and leaves the scheduler usable', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let current = 'baseline';
+  const scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => writes.push(current)
+  }));
+
+  scheduler.markDirty();
+  clock.advance(100);
+  current = 'first pending';
+  scheduler.markDirty();
+  assert.equal(clock.timerCount(), 1);
+
+  scheduler.flushPending();
+
+  assert.deepEqual(writes, ['baseline', 'first pending']);
+  assert.equal(clock.timerCount(), 0);
+
+  clock.advance(100);
+  current = 'second pending';
+  scheduler.markDirty();
+  scheduler.flushPending();
+
+  assert.deepEqual(writes, ['baseline', 'first pending', 'second pending']);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('reentrant flushPending drains only a newer dirty generation without recursion', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let current = 'baseline';
+  let reenter = true;
+  let writeDepth = 0;
+  let maxWriteDepth = 0;
+  let scheduler;
+  scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      writeDepth += 1;
+      maxWriteDepth = Math.max(maxWriteDepth, writeDepth);
+      writes.push(current);
+      if (reenter) {
+        reenter = false;
+        scheduler.flushPending();
+        current = 'reentrant latest';
+        scheduler.markDirty();
+        scheduler.flushPending();
+      }
+      writeDepth -= 1;
+    }
+  }));
+
+  scheduler.markDirty();
+
+  assert.deepEqual(writes, ['baseline', 'reentrant latest']);
+  assert.equal(maxWriteDepth, 1);
+  assert.equal(clock.timerCount(), 0);
+  scheduler.flushPending();
+  assert.deepEqual(writes, ['baseline', 'reentrant latest']);
+});
+
 test('failed timer writes log and retry once after a positive delay', () => {
   const clock = createManualClock();
   const errors = [];

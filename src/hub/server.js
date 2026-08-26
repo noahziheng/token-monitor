@@ -60,8 +60,12 @@ function createHub({
   }
 
   function logError(error) {
-    if (typeof logger?.error === 'function') logger.error(error);
-    else console.error(error);
+    try {
+      if (typeof logger?.error === 'function') logger.error(error);
+      else console.error(error);
+    } catch (_) {
+      // Logging must never replace the operation failure being reported.
+    }
   }
 
   const persistence = createPersistenceScheduler({
@@ -286,7 +290,7 @@ function createHub({
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
-      (logger.error || console.error)(error);
+      logError(error);
       sendJson(res, 500, { error: 'internal_error', message: error.message });
     });
   });
@@ -301,20 +305,35 @@ function createHub({
     });
   }
 
+  let stopPromise = null;
+
   function stop() {
-    return new Promise((resolve, reject) => {
-      for (const res of sseClients) { try { res.end(); } catch (_) {} }
-      sseClients.clear();
-      server.close(() => {
-        try {
-          persistence.stop();
-          resolve();
-        } catch (error) {
-          logError(error);
-          reject(error);
-        }
-      });
+    if (stopPromise) return stopPromise;
+    let resolveStop;
+    let rejectStop;
+    stopPromise = new Promise((resolve, reject) => {
+      resolveStop = resolve;
+      rejectStop = reject;
     });
+
+    for (const res of sseClients) { try { res.end(); } catch (_) {} }
+    sseClients.clear();
+    server.close(() => {
+      try {
+        persistence.stop();
+        resolveStop();
+      } catch (error) {
+        logError(error);
+        rejectStop(error);
+      }
+    });
+
+    try {
+      persistence.flushPending();
+    } catch (_) {
+      // Keep failed preflush state dirty; the final stop owns the outcome.
+    }
+    return stopPromise;
   }
 
   return {
