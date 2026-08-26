@@ -53,7 +53,7 @@ The scheduler receives an injected synchronous `write` callback. It does not kno
 
 `markDirty()` is used by ingest. If no successful write exists or the configured interval has elapsed, it performs a leading write synchronously. Otherwise it arms one timer for the remaining window. Timer execution performs the trailing write. It does not reset the deadline for each ingest, so continuous traffic still reaches disk once per interval.
 
-`flush()` is used by durable mutations. It cancels a pending timer and synchronously writes the latest combined store. A successful flush clears dirty state and starts a new throttle window.
+`flush()` is used after durable mutations. It cancels a pending timer and synchronously writes the latest combined store even when the scheduler was previously clean, because subscription replacement and deletion happen outside the scheduler. A successful flush clears dirty state and starts a new throttle window; a failed forced flush marks the scheduler dirty before arming its retry.
 
 `stop()` cancels the timer and synchronously attempts one final flush after the HTTP server has stopped accepting work and drained its active requests. The timer is unreferenced when the runtime supports `unref()`, so it cannot keep a process alive by itself.
 
@@ -104,7 +104,8 @@ Precedence remains `CLI -> environment -> built-in default`, matching the other 
 - Minimum: `0` ms.
 - Maximum: `60000` ms.
 - `0`: compatibility mode that performs every ingest write synchronously, matching the previous behavior.
-- Non-finite, negative, or otherwise invalid input: fall back to `5000` ms.
+- Only finite numbers and non-empty numeric strings are accepted. Booleans, `null`, blank strings, negative values, and non-finite input fall back to `5000` ms.
+- Positive fractional milliseconds round up, so a positive value can never silently select legacy `0` mode.
 - Positive values above `60000`: clamp to `60000` ms so a typo cannot create an unexpectedly large crash-loss window.
 
 The option is intentionally absent from widget settings. The embedded Hub uses the default, keeping GUI and persisted settings schemas unchanged. Operators who require the previous standalone behavior can set the environment variable to `0`; tests and programmatic callers can do the same through `createHub()`.
