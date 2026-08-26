@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { createHub, resolveBindHost } = require('../../src/hub/server');
+const { createHub, resolveBindHost, resolvePersistIntervalMs } = require('../../src/hub/server');
 const { HUB_PERSIST_RETRY_DELAY_MS } = require('../../src/hub/persistenceScheduler');
 const { codexAccountKey } = require('../../src/shared/codexAuth');
 
@@ -70,6 +70,56 @@ test('resolveBindHost leaves an already-loopback host unchanged without a secret
   assert.equal(resolveBindHost('127.0.0.1', ''), '127.0.0.1');
   assert.equal(resolveBindHost('localhost', ''), 'localhost');
   assert.equal(resolveBindHost('::1', ''), '::1');
+});
+
+test('resolvePersistIntervalMs prefers a present CLI value over the environment', () => {
+  assert.equal(resolvePersistIntervalMs(
+    { persistIntervalMs: '2500' },
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '4000' }
+  ), 2500);
+  assert.equal(resolvePersistIntervalMs(
+    { persistIntervalMs: 'invalid' },
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '4000' }
+  ), 5000);
+});
+
+test('resolvePersistIntervalMs uses the environment only when the CLI option is absent', () => {
+  assert.equal(resolvePersistIntervalMs(
+    {},
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '3500' }
+  ), 3500);
+  assert.equal(resolvePersistIntervalMs({}, {}), 5000);
+  assert.equal(resolvePersistIntervalMs(
+    {},
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: 'invalid' }
+  ), 5000);
+});
+
+test('resolvePersistIntervalMs retains zero from CLI and environment', () => {
+  assert.equal(resolvePersistIntervalMs({ persistIntervalMs: '0' }, {}), 0);
+  assert.equal(resolvePersistIntervalMs(
+    {},
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '0' }
+  ), 0);
+});
+
+test('resolvePersistIntervalMs rejects invalid CLI and environment values', () => {
+  const invalidValues = [true, null, '', '   ', -1, '-1', 'nope'];
+  for (const value of invalidValues) {
+    assert.equal(resolvePersistIntervalMs({ persistIntervalMs: value }, {}), 5000);
+    assert.equal(resolvePersistIntervalMs(
+      {},
+      { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: value }
+    ), 5000);
+  }
+});
+
+test('resolvePersistIntervalMs rounds positive fractions up and clamps large values', () => {
+  assert.equal(resolvePersistIntervalMs({ persistIntervalMs: '0.1' }, {}), 1);
+  assert.equal(resolvePersistIntervalMs(
+    {},
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '60000.1' }
+  ), 60000);
 });
 
 test('a hub without a secret binds to localhost only even when asked to bind every interface', async () => {

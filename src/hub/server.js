@@ -15,7 +15,11 @@ const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
-const { DEFAULT_HUB_PERSIST_INTERVAL_MS, createPersistenceScheduler } = require('./persistenceScheduler');
+const {
+  DEFAULT_HUB_PERSIST_INTERVAL_MS,
+  createPersistenceScheduler,
+  normalizePersistIntervalMs
+} = require('./persistenceScheduler');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
@@ -27,6 +31,13 @@ function resolveBindHost(host, secret) {
   const requested = String(host || '').trim() || '0.0.0.0';
   if (secret) return requested;
   return LOOPBACK_HOSTS.has(requested.toLowerCase()) ? requested : '127.0.0.1';
+}
+
+function resolvePersistIntervalMs(args = {}, env = {}) {
+  const cliValue = Object.hasOwn(args || {}, 'persistIntervalMs')
+    ? args.persistIntervalMs
+    : env?.TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS;
+  return normalizePersistIntervalMs(cliValue);
 }
 
 function createHub({
@@ -350,8 +361,9 @@ if (require.main === module) {
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
+  const persistIntervalMs = resolvePersistIntervalMs(args, process.env);
 
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile });
+  const hub = createHub({ port, host, secret, staleAfterMs, dataFile, persistIntervalMs });
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);
@@ -364,4 +376,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createHub, resolveBindHost };
+module.exports = { createHub, resolveBindHost, resolvePersistIntervalMs };
