@@ -51,6 +51,7 @@ function createPersistenceScheduler(options = {}) {
   let timerKind = null;
   let mutationGeneration = 0;
   let writeInProgress = false;
+  let pendingForce = false;
 
   if (typeof write !== 'function') throw new TypeError('write must be a function');
 
@@ -86,11 +87,12 @@ function createPersistenceScheduler(options = {}) {
     writeInProgress = true;
     try {
       do {
+        pendingForce = false;
         const writeGeneration = mutationGeneration;
         write();
         lastSuccessfulWriteAt = now();
         dirty = mutationGeneration !== writeGeneration;
-      } while (dirty && (stopped || intervalMs === 0));
+      } while (dirty && (pendingForce || stopped || intervalMs === 0));
     } catch (error) {
       dirty = true;
       if (!stopped) armRetry();
@@ -129,7 +131,10 @@ function createPersistenceScheduler(options = {}) {
     clearScheduledTimer();
     mutationGeneration += 1;
     dirty = true;
-    if (writeInProgress) return;
+    if (writeInProgress) {
+      pendingForce = true;
+      return;
+    }
     attemptWrite();
   }
 

@@ -518,3 +518,64 @@ test('each repeated timer failure is reported and re-arms one positive retry', (
   assert.equal(clock.maxTimerCount(), 1);
   assert.deepEqual(clock.handles.map((handle) => handle.unrefCalls), [1, 1, 1, 1]);
 });
+
+test('a reentrant flush writes the forced mutation sequentially before returning', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let current = 0;
+  let writeDepth = 0;
+  let maxWriteDepth = 0;
+  let forceLatest = true;
+  let scheduler;
+  scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      writeDepth += 1;
+      maxWriteDepth = Math.max(maxWriteDepth, writeDepth);
+      writes.push(current);
+      if (forceLatest) {
+        forceLatest = false;
+        current = 1;
+        scheduler.flush();
+      }
+      writeDepth -= 1;
+    }
+  }));
+
+  scheduler.markDirty();
+
+  assert.deepEqual(writes, [0, 1]);
+  assert.equal(maxWriteDepth, 1);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('a failed reentrant forced write keeps the latest state dirty for retry', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let current = 0;
+  let attempts = 0;
+  let forceLatest = true;
+  let scheduler;
+  scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      attempts += 1;
+      writes.push(current);
+      if (forceLatest) {
+        forceLatest = false;
+        current = 1;
+        scheduler.flush();
+        return;
+      }
+      if (attempts === 2) throw new Error('forced write failed');
+    }
+  }));
+
+  assert.throws(() => scheduler.markDirty(), /forced write failed/);
+  assert.deepEqual(writes, [0, 1]);
+  assert.equal(clock.timerCount(), 1);
+  assert.equal(clock.nextTimer().delayMs, HUB_PERSIST_RETRY_DELAY_MS);
+
+  clock.advance(HUB_PERSIST_RETRY_DELAY_MS);
+
+  assert.deepEqual(writes, [0, 1, 1]);
+  assert.equal(clock.timerCount(), 0);
+});
