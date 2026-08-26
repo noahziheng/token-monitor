@@ -394,3 +394,127 @@ test('stop does not arm a retry when its final dirty write fails', () => {
   assert.throws(() => scheduler.stop(), /shutdown write failed/);
   assert.equal(clock.timerCount(), 0);
 });
+
+test('a reentrant mark during the initial write stays dirty until the trailing deadline', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let scheduler;
+  let reenter = true;
+  scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      writes.push(clock.now());
+      if (!reenter) return;
+      reenter = false;
+      scheduler.markDirty();
+    }
+  }));
+
+  scheduler.markDirty();
+
+  assert.deepEqual(writes, [0]);
+  assert.equal(clock.timerCount(), 1);
+  assert.equal(clock.nextTimer().dueAt, 5000);
+
+  clock.advance(5000);
+
+  assert.deepEqual(writes, [0, 5000]);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('stop persists a reentrant mutation created during flush', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let current = 'baseline';
+  let reenterDuringFlush = false;
+  let scheduler;
+  scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      writes.push(current);
+      if (!reenterDuringFlush) return;
+      reenterDuringFlush = false;
+      current = 'reentrant latest';
+      scheduler.markDirty();
+    }
+  }));
+
+  scheduler.markDirty();
+  clock.advance(100);
+  current = 'forced snapshot';
+  reenterDuringFlush = true;
+  scheduler.flush();
+  scheduler.stop();
+
+  assert.deepEqual(writes, ['baseline', 'forced snapshot', 'reentrant latest']);
+  assert.equal(clock.timerCount(), 0);
+});
+
+test('stop drains a newer reentrant mutation without recursive writes', () => {
+  const clock = createManualClock();
+  const writes = [];
+  let writeDepth = 0;
+  let maxWriteDepth = 0;
+  let reenter = true;
+  let scheduler;
+  scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      writeDepth += 1;
+      maxWriteDepth = Math.max(maxWriteDepth, writeDepth);
+      writes.push(clock.now());
+      if (reenter) {
+        reenter = false;
+        scheduler.markDirty();
+        scheduler.stop();
+      }
+      writeDepth -= 1;
+    }
+  }));
+
+  scheduler.markDirty();
+
+  assert.deepEqual(writes, [0, 0]);
+  assert.equal(maxWriteDepth, 1);
+  assert.equal(clock.timerCount(), 0);
+  assert.throws(
+    () => scheduler.markDirty(),
+    { message: 'Persistence scheduler has been stopped' }
+  );
+});
+
+test('each repeated timer failure is reported and re-arms one positive retry', () => {
+  const clock = createManualClock();
+  const errors = [];
+  let attempts = 0;
+  let failuresRemaining = 0;
+  const scheduler = createPersistenceScheduler(schedulerOptions(clock, {
+    write: () => {
+      attempts += 1;
+      if (failuresRemaining === 0) return;
+      const failureNumber = 4 - failuresRemaining;
+      failuresRemaining -= 1;
+      throw new Error(`failure ${failureNumber}`);
+    },
+    onError: (error) => errors.push(error.message)
+  }));
+
+  scheduler.markDirty();
+  clock.advance(1);
+  scheduler.markDirty();
+  failuresRemaining = 3;
+  clock.advance(4999);
+
+  for (let failureNumber = 1; failureNumber <= 3; failureNumber += 1) {
+    assert.deepEqual(errors, Array.from(
+      { length: failureNumber },
+      (_, index) => `failure ${index + 1}`
+    ));
+    assert.equal(clock.timerCount(), 1);
+    assert.equal(clock.nextTimer().delayMs, HUB_PERSIST_RETRY_DELAY_MS);
+    assert.ok(clock.nextTimer().delayMs > 0);
+    clock.advance(HUB_PERSIST_RETRY_DELAY_MS);
+  }
+
+  assert.equal(attempts, 5);
+  assert.equal(clock.timerCount(), 0);
+  assert.equal(clock.maxTimerCount(), 1);
+  assert.deepEqual(clock.handles.map((handle) => handle.unrefCalls), [1, 1, 1, 1]);
+});

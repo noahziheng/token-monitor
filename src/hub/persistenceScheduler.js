@@ -49,6 +49,8 @@ function createPersistenceScheduler(options = {}) {
   let lastSuccessfulWriteAt = null;
   let timer = null;
   let timerKind = null;
+  let mutationGeneration = 0;
+  let writeInProgress = false;
 
   if (typeof write !== 'function') throw new TypeError('write must be a function');
 
@@ -80,20 +82,31 @@ function createPersistenceScheduler(options = {}) {
   }
 
   function attemptWrite() {
+    if (writeInProgress) return;
+    writeInProgress = true;
     try {
-      write();
+      do {
+        const writeGeneration = mutationGeneration;
+        write();
+        lastSuccessfulWriteAt = now();
+        dirty = mutationGeneration !== writeGeneration;
+      } while (dirty && (stopped || intervalMs === 0));
     } catch (error) {
       dirty = true;
       if (!stopped) armRetry();
       throw error;
+    } finally {
+      writeInProgress = false;
     }
-    dirty = false;
-    lastSuccessfulWriteAt = now();
+
+    if (dirty && !stopped) armTimer('trailing', intervalMs);
   }
 
   function markDirty() {
     if (stopped) throw new Error(STOPPED_ERROR_MESSAGE);
+    mutationGeneration += 1;
     dirty = true;
+    if (writeInProgress) return;
     if (timerKind === 'retry') return;
 
     const currentTime = now();
@@ -114,7 +127,9 @@ function createPersistenceScheduler(options = {}) {
   function flush() {
     if (stopped) throw new Error(STOPPED_ERROR_MESSAGE);
     clearScheduledTimer();
+    mutationGeneration += 1;
     dirty = true;
+    if (writeInProgress) return;
     attemptWrite();
   }
 
@@ -122,7 +137,7 @@ function createPersistenceScheduler(options = {}) {
     if (stopped) return;
     stopped = true;
     clearScheduledTimer();
-    if (dirty) attemptWrite();
+    if (dirty && !writeInProgress) attemptWrite();
   }
 
   return { flush, markDirty, stop };
