@@ -2,6 +2,8 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const http = require('node:http');
+const { performance } = require('node:perf_hooks');
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -11,6 +13,45 @@ const { codexAccountKey } = require('../../src/shared/codexAuth');
 
 function tempDataFile() {
   return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+}
+
+function cleanupDataFile(dataFile) {
+  fs.rmSync(`${dataFile}.tmp`, { recursive: true, force: true });
+  fs.rmSync(dataFile, { force: true });
+}
+
+function flushForCleanup(hub) {
+  const current = hub.getSubscriptions();
+  try {
+    hub.setSubscriptions(current.subscriptions, current.updatedAt);
+  } catch (_) {
+    // A stopped scheduler has already cleared its timer and needs no cleanup flush.
+  }
+}
+
+function readStore(dataFile) {
+  return JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+}
+
+function usagePayload(deviceId, totalTokens) {
+  return {
+    deviceId,
+    updatedAt: new Date().toISOString(),
+    today: { totalTokens }
+  };
+}
+
+function storedTodayTokens(dataFile, deviceId) {
+  return readStore(dataFile).devices[deviceId].periods.today.totalTokens;
+}
+
+async function waitFor(predicate, message, timeoutMs = 2000) {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (performance.now() >= deadline) assert.fail(`Timed out waiting for ${message} after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 test('resolveBindHost keeps the requested host when a secret is set', () => {
@@ -71,6 +112,239 @@ test('ingest inserts a device and is visible in getStats', () => {
     assert.equal(hub.getStats().devices.length, 1);
   } finally {
     fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('coalesced ingest is live in memory before the trailing disk write', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() {} }
+  });
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+
+    hub.ingest(usagePayload('dev-a', 9));
+
+    assert.equal(hub.getStats().periods.today.totalTokens, 9);
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+  } finally {
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('a subscription write persists synchronously when the scheduler is clean', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() {} }
+  });
+  const subscription = { id: 'sub-clean', provider: 'codex', startDate: '2026-08-26' };
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+
+    hub.setSubscriptions([subscription], '');
+
+    assert.deepEqual(readStore(dataFile).subscriptions.subscriptions.map((entry) => entry.id), ['sub-clean']);
+  } finally {
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('subscription persistence also flushes the newest coalesced device record', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() {} }
+  });
+  const subscription = { id: 'sub-dirty', provider: 'claude', startDate: '2026-08-26' };
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    hub.ingest(usagePayload('dev-a', 9));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+
+    hub.setSubscriptions([subscription], '');
+
+    const stored = readStore(dataFile);
+    assert.equal(stored.devices['dev-a'].periods.today.totalTokens, 9);
+    assert.deepEqual(stored.subscriptions.subscriptions.map((entry) => entry.id), ['sub-dirty']);
+  } finally {
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('device deletion flushes pending ingest state immediately', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() {} }
+  });
+  try {
+    hub.ingest(usagePayload('delete-me', 3));
+    hub.ingest(usagePayload('keep-me', 7));
+    assert.equal(readStore(dataFile).devices['keep-me'], undefined);
+
+    hub.deleteDevice('delete-me');
+
+    const stored = readStore(dataFile);
+    assert.equal(stored.devices['delete-me'], undefined);
+    assert.equal(stored.devices['keep-me'].periods.today.totalTokens, 7);
+  } finally {
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('persistIntervalMs zero preserves per-ingest disk writes', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 0,
+    logger: { error() {} }
+  });
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+
+    hub.ingest(usagePayload('dev-a', 9));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 9);
+  } finally {
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('the trailing timer persists the latest coalesced device record', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 100,
+    logger: { error() {} }
+  });
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    hub.ingest(usagePayload('dev-a', 9));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+
+    await waitFor(
+      () => storedTodayTokens(dataFile, 'dev-a') === 9,
+      'the Hub trailing write to reach disk'
+    );
+  } finally {
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('stop drains an in-flight ingest before the final persistence flush', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error() {} }
+  });
+  let request;
+  await hub.start();
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    const payload = JSON.stringify(usagePayload('dev-a', 9));
+    const requestSeen = new Promise((resolve) => hub.server.once('request', resolve));
+    const responsePromise = new Promise((resolve, reject) => {
+      const { port } = hub.server.address();
+      request = http.request({
+        host: '127.0.0.1',
+        port,
+        path: '/api/ingest',
+        method: 'POST',
+        headers: {
+          connection: 'close',
+          'content-length': Buffer.byteLength(payload),
+          'content-type': 'application/json'
+        }
+      }, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => resolve({ body, statusCode: response.statusCode }));
+      });
+      request.on('error', reject);
+    });
+
+    request.write(payload.slice(0, -1));
+    await requestSeen;
+    const stopPromise = hub.stop();
+    request.end(payload.slice(-1));
+
+    const [response] = await Promise.all([responsePromise, stopPromise]);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 9);
+  } finally {
+    request?.destroy();
+    if (hub.server.listening) await hub.stop();
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
+  }
+});
+
+test('stop rejects a failed final flush after closing the server', async () => {
+  const dataFile = tempDataFile();
+  const errors = [];
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    dataFile,
+    persistIntervalMs: 60000,
+    logger: { error(error) { errors.push(error); } }
+  });
+  const blocker = `${dataFile}.tmp`;
+  await hub.start();
+  try {
+    hub.ingest(usagePayload('dev-a', 5));
+    const baselineSavedAt = readStore(dataFile).savedAt;
+    hub.ingest(usagePayload('dev-a', 9));
+    assert.equal(storedTodayTokens(dataFile, 'dev-a'), 5);
+    fs.mkdirSync(blocker);
+
+    await assert.rejects(hub.stop());
+
+    assert.equal(hub.server.listening, false);
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0] instanceof Error);
+    assert.equal(readStore(dataFile).savedAt, baselineSavedAt);
+  } finally {
+    fs.rmSync(blocker, { recursive: true, force: true });
+    if (hub.server.listening) await hub.stop();
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
   }
 });
 

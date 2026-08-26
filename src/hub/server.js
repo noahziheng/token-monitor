@@ -15,6 +15,7 @@ const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
+const { DEFAULT_HUB_PERSIST_INTERVAL_MS, createPersistenceScheduler } = require('./persistenceScheduler');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
@@ -34,6 +35,7 @@ function createHub({
   secret = '',
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
+  persistIntervalMs = DEFAULT_HUB_PERSIST_INTERVAL_MS,
   logger = console
 } = {}) {
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
@@ -46,10 +48,27 @@ function createHub({
   const bindHost = resolveBindHost(host, secret);
 
   function persist() {
+    const previousSavedAt = store.savedAt;
     store.version = 1;
     store.savedAt = new Date().toISOString();
-    writeJsonAtomic(dataFile, store);
+    try {
+      writeJsonAtomic(dataFile, store);
+    } catch (error) {
+      store.savedAt = previousSavedAt;
+      throw error;
+    }
   }
+
+  function logError(error) {
+    if (typeof logger?.error === 'function') logger.error(error);
+    else console.error(error);
+  }
+
+  const persistence = createPersistenceScheduler({
+    intervalMs: persistIntervalMs,
+    write: persist,
+    onError: logError
+  });
 
   function getStats() {
     const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
@@ -104,14 +123,14 @@ function createHub({
     }
     const record = mergeDeviceRecord(store.devices[String(payload.deviceId || payload.id)], { ...payload, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
-    persist();
+    persistence.markDirty();
     broadcastStats('ingest');
     return record;
   }
 
   function deleteDevice(deviceId) {
     delete store.devices[deviceId];
-    persist();
+    persistence.flush();
     broadcastStats('delete');
   }
 
@@ -158,7 +177,7 @@ function createHub({
     const previousSavedAt = store.savedAt;
     store.subscriptions = next;
     try {
-      persist();
+      persistence.flush();
     } catch (error) {
       store.subscriptions = previous;
       store.savedAt = previousSavedAt;
@@ -283,10 +302,18 @@ function createHub({
   }
 
   function stop() {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       for (const res of sseClients) { try { res.end(); } catch (_) {} }
       sseClients.clear();
-      server.close(() => resolve());
+      server.close(() => {
+        try {
+          persistence.stop();
+          resolve();
+        } catch (error) {
+          logError(error);
+          reject(error);
+        }
+      });
     });
   }
 
