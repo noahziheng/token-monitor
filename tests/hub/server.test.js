@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const { createHub, resolveBindHost, resolvePersistIntervalMs } = require('../../src/hub/server');
 const { HUB_PERSIST_RETRY_DELAY_MS } = require('../../src/hub/persistenceScheduler');
 const { codexAccountKey } = require('../../src/shared/codexAuth');
+const { parseArgs } = require('../../src/shared/config');
 
 function tempDataFile() {
   return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
@@ -81,6 +82,13 @@ test('resolvePersistIntervalMs prefers a present CLI value over the environment'
     { persistIntervalMs: 'invalid' },
     { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '4000' }
   ), 5000);
+});
+
+test('resolvePersistIntervalMs accepts the documented CLI spelling through parseArgs', () => {
+  assert.equal(resolvePersistIntervalMs(
+    parseArgs(['--persistIntervalMs=2500']),
+    { TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS: '4000' }
+  ), 2500);
 });
 
 test('resolvePersistIntervalMs uses the environment only when the CLI option is absent', () => {
@@ -567,7 +575,8 @@ test('Hub keeps same-email Codex Personal and Team workspaces distinct across de
     );
     assert.ok(codexProviders.every((entry) => entry.sourceDeviceId === 'desktop'));
   } finally {
-    fs.rmSync(dataFile, { force: true });
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
   }
 });
 
@@ -598,7 +607,8 @@ test('onStats fires on ingest and on deleteDevice, and unsubscribe stops it', ()
     hub.ingest({ deviceId: 'dev-b', today: { totalTokens: 1 } });
     assert.equal(calls, 2);
   } finally {
-    fs.rmSync(dataFile, { force: true });
+    flushForCleanup(hub);
+    cleanupDataFile(dataFile);
   }
 });
 
