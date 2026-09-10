@@ -27,8 +27,12 @@ The adapter improves model attribution and avoids assigning an entire old sessio
 
 Actual token-event time is a generally useful session-activity fix, but the local 512 KiB tail scan should not become a second unbounded file-indexing subsystem. Compare against current Tokscale Codex session parsing and add narrowly scoped fixture tests there if the gap remains.
 
-The old `df152d8` change from approval `untrusted` to `never` is already present in upstream's extracted `src/shared/providers/codex/limits.js`. Only historical ancestry/additional test coverage remains downstream; there is no distinct implementation to contribute again.
+The old `df152d8` change from approval `untrusted` to `never` is already present in upstream's extracted `src/shared/providers/codex/limits.js`. The redundant downstream flag test has now been removed by restoring that test file from current upstream. Historical ancestry remains, but there is no distinct implementation to contribute again.
 
 ## Deployment-only
 
 Release records, local archive branches, CI branch selectors, credential references, provider enablement, shared-state migration choices and service paths belong to the downstream fork/IaC. Never include real account data, credentials, host screenshots or runtime SQLite files in contribution branches.
+
+## Follow-up review
+
+See [the source/community and I/O review](REVIEW-2026-09-10.md). The persistence proposal is now lower priority: measured local I/O does not demonstrate disk damage or a user-visible performance problem. The initial candidate's remote CI exposed a timezone-specific test fixture; the follow-up uses local calendar midnight and verifies UTC, Shanghai and Los Angeles. Do not treat the original candidate tag as fully cross-platform verified.

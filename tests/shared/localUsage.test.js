@@ -2,7 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { hermesPeriodRows, openclawEventRow } = require('../../src/shared/localUsage');
-const start = new Date('2026-09-10T00:00:00+08:00').getTime();
+// The adapter buckets by the process-local calendar, not a fixed UTC offset.
+const start = new Date(2026, 8, 10).getTime();
 test('Hermes long-lived sessions are not moved wholesale into today; observed deltas retain actual model', () => {
   const row = { key: 'one', model: 'doubao-seed-evolving', firstSeen: start - 86400000, input: 100, output: 10, cacheRead: 20, cacheWrite: 0 };
   const ledger = {};
