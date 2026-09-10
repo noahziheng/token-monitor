@@ -15,6 +15,11 @@ const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
+const {
+  DEFAULT_HUB_PERSIST_INTERVAL_MS,
+  createPersistenceScheduler,
+  normalizePersistIntervalMs
+} = require('./persistenceScheduler');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
@@ -28,12 +33,20 @@ function resolveBindHost(host, secret) {
   return LOOPBACK_HOSTS.has(requested.toLowerCase()) ? requested : '127.0.0.1';
 }
 
+function resolvePersistIntervalMs(args = {}, env = {}) {
+  const cliValue = Object.hasOwn(args || {}, 'persistIntervalMs')
+    ? args.persistIntervalMs
+    : env?.TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS;
+  return normalizePersistIntervalMs(cliValue);
+}
+
 function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
+  persistIntervalMs = DEFAULT_HUB_PERSIST_INTERVAL_MS,
   logger = console
 } = {}) {
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
@@ -46,10 +59,31 @@ function createHub({
   const bindHost = resolveBindHost(host, secret);
 
   function persist() {
+    const previousSavedAt = store.savedAt;
     store.version = 1;
     store.savedAt = new Date().toISOString();
-    writeJsonAtomic(dataFile, store);
+    try {
+      writeJsonAtomic(dataFile, store);
+    } catch (error) {
+      store.savedAt = previousSavedAt;
+      throw error;
+    }
   }
+
+  function logError(error) {
+    try {
+      if (typeof logger?.error === 'function') logger.error(error);
+      else console.error(error);
+    } catch (_) {
+      // Logging must never replace the operation failure being reported.
+    }
+  }
+
+  const persistence = createPersistenceScheduler({
+    intervalMs: persistIntervalMs,
+    write: persist,
+    onError: logError
+  });
 
   function getStats() {
     const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
@@ -104,14 +138,14 @@ function createHub({
     }
     const record = mergeDeviceRecord(store.devices[String(payload.deviceId || payload.id)], { ...payload, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
-    persist();
+    persistence.markDirty();
     broadcastStats('ingest');
     return record;
   }
 
   function deleteDevice(deviceId) {
     delete store.devices[deviceId];
-    persist();
+    persistence.flush();
     broadcastStats('delete');
   }
 
@@ -158,7 +192,7 @@ function createHub({
     const previousSavedAt = store.savedAt;
     store.subscriptions = next;
     try {
-      persist();
+      persistence.flush();
     } catch (error) {
       store.subscriptions = previous;
       store.savedAt = previousSavedAt;
@@ -267,7 +301,7 @@ function createHub({
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
-      (logger.error || console.error)(error);
+      logError(error);
       sendJson(res, 500, { error: 'internal_error', message: error.message });
     });
   });
@@ -282,12 +316,35 @@ function createHub({
     });
   }
 
+  let stopPromise = null;
+
   function stop() {
-    return new Promise((resolve) => {
-      for (const res of sseClients) { try { res.end(); } catch (_) {} }
-      sseClients.clear();
-      server.close(() => resolve());
+    if (stopPromise) return stopPromise;
+    let resolveStop;
+    let rejectStop;
+    stopPromise = new Promise((resolve, reject) => {
+      resolveStop = resolve;
+      rejectStop = reject;
     });
+
+    for (const res of sseClients) { try { res.end(); } catch (_) {} }
+    sseClients.clear();
+    server.close(() => {
+      try {
+        persistence.stop();
+        resolveStop();
+      } catch (error) {
+        logError(error);
+        rejectStop(error);
+      }
+    });
+
+    try {
+      persistence.flushPending();
+    } catch (_) {
+      // Keep failed preflush state dirty; the final stop owns the outcome.
+    }
+    return stopPromise;
   }
 
   return {
@@ -304,8 +361,9 @@ if (require.main === module) {
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
+  const persistIntervalMs = resolvePersistIntervalMs(args, process.env);
 
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile });
+  const hub = createHub({ port, host, secret, staleAfterMs, dataFile, persistIntervalMs });
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);
@@ -318,4 +376,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createHub, resolveBindHost };
+module.exports = { createHub, resolveBindHost, resolvePersistIntervalMs };

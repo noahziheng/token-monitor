@@ -35,6 +35,7 @@ The agent and hub have no UI. Configure them with a `.env` file in the project r
 ```env
 TOKEN_MONITOR_HUB_URL=               # required in sync mode — Worker URL or http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # shared secret; must match the hub
+TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS= # Node Hub only — optional disk-write cadence
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
@@ -58,6 +59,10 @@ TOKEN_MONITOR_WORKBUDDY_DOMAIN=      # headless only — X-Domain metadata
 TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO= # headless only — enterprise metadata
 TOKEN_MONITOR_WORKBUDDY_LOCALE=       # headless only — en or zh
 ```
+
+`TOKEN_MONITOR_HUB_PERSIST_INTERVAL_MS` affects the Node Hub only, not the Cloudflare Worker. It defaults to `5000` ms and accepts `0`–`60000`; `0` restores the legacy synchronous write on every ingest. Subscription edits and device deletion still flush the combined Hub state immediately, including any pending device updates.
+
+The equivalent command-line option is `--persistIntervalMs`, for example `npm run hub -- --persistIntervalMs=5000`. As with other headless settings, the CLI value takes precedence over the environment.
 
 Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, Alibaba Token Plan, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget automatically reads the session owned by the local WorkBuddy app when that provider is enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
 
