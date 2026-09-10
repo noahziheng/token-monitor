@@ -1,0 +1,33 @@
+{
+  "release": "noah-20260911.3",
+  "status": "deployed-static-overlay",
+  "staticSourceCommit": "9b97baf8393dc7c6246728ad7a547bd1cf4f7b44",
+  "contributionCommit": "d5adc72",
+  "contributionPR": "https://github.com/Javis603/token-monitor/pull/656",
+  "runtimeComponentsUnchanged": {
+    "web": "4ee91c078f0a5aea447e05d8c187f982679b2858",
+    "agent": "8622d220e39c830b5eae050da92e2713a896ea7a",
+    "hub": "eb23c8f2e5ffbf01703746910a31196bee3ae086"
+  },
+  "deployment": "Copied new hashed assets first; atomically replaced index.html and sw.js in active Web dist. Old hashed assets retained. No restart or server/config change.",
+  "staticCache": "token-monitor-static-v22",
+  "verification": {
+    "webContributionPassed": 110,
+    "rootContributionPassed": 4205,
+    "rootContributionSkipped": 3,
+    "webLocalPassed": 111,
+    "typecheckAndBuild": "passed both branches",
+    "browserWidths": [
+      390,
+      800,
+      1200
+    ],
+    "browserScenario": "seven synthetic cards per group, expanded details; first-column alignment, row separation and horizontal overflow assertions passed",
+    "liveFiles": "exact staged file bytes verified using same compiled Web handler in temporary loopback preview; public assets are OIDC-protected and were not anonymously verified",
+    "webPID": 2671981,
+    "agentPID": 2635102,
+    "hubPID": 2370772
+  },
+  "backup": "/var/tmp/noah-agent-builds/token-monitor-layout-20260911/pre-deploy-dist",
+  "notes": "Source release directory contains the immutable static artifact. Active server source remains4ee91c0 with this recorded static overlay; future full Web builds from deploy/noah include the patch."
+}

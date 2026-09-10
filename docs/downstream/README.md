@@ -25,7 +25,11 @@ This directory belongs to the fork deployment branch, not the upstream feature P
 
 `noah-20260910.1-rc1` integrates upstream `d897141`, saved runtime patches `d145ce6`, and Web `1cf3d36`. See the release JSON and contribution assessment. It has **not** replaced the current services. Existing Web/Hub/agent service directories remain unchanged; the fixed-release-directory/IaC switch is a subsequent rollout, not something this record claims has happened.
 
-## Active release
+## Active static patch
+
+`noah-20260911.3` publishes static source `9b97baf8393dc7c6246728ad7a547bd1cf4f7b44` over the running Web release below. It fixes wrapped quota/balance card rows and bumps PWA static cache tov22. New hashed assets were copied before atomic entry-point replacement; old hashes remain available. No process, authentication setting or server code changed. See [the static patch receipt](releases/noah-20260911.3.json), including rollback location and verification scope. Full future builds from this branch include the fix.
+
+## Active server release
 
 `noah-20260911.2` enables same-origin Desktop/agent Bearer access on Web while keeping browser OIDC read-only:
 
