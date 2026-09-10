@@ -1,0 +1,41 @@
+{
+  "release": "noah-20260911.4",
+  "status": "deployed-static-overlay",
+  "staticSourceCommit": "706fbdafa5a234e7d0e93dad6a5bee9895e3fb49",
+  "contributionCommit": "0652dc338e4fd7dc83e666f86b857b09a41198cd",
+  "contributionPR": "https://github.com/Javis603/token-monitor/pull/656",
+  "runtimeComponentsUnchanged": {
+    "web": "4ee91c078f0a5aea447e05d8c187f982679b2858",
+    "agent": "8622d220e39c830b5eae050da92e2713a896ea7a",
+    "hub": "eb23c8f2e5ffbf01703746910a31196bee3ae086"
+  },
+  "deployment": "Copied new hashed assets first; atomically replaced index.html and sw.js in active Web dist. Old hashed assets retained. No restart, backend or configuration change.",
+  "staticCache": "token-monitor-static-v23",
+  "assets": {
+    "css": "index-Djbwuin1.css",
+    "js": "index-DnyEDnZj.js"
+  },
+  "verification": {
+    "webContributionPassed": 115,
+    "webLocalPassed": 116,
+    "rootContributionPassed": 4205,
+    "rootContributionSkipped": 3,
+    "typecheckAndBuild": "passed both branches",
+    "browserWidths": [
+      390,
+      800,
+      1200
+    ],
+    "browserScenario": "Hidden card survives refresh; all-hidden state retains management and restore-all; restore succeeds; no horizontal overflow. Actual deployed static files served through compiled loopback gateway with synthetic two-account data: Personal hidden and Work still visible after reload.",
+    "liveFiles": "Every deployed dist file byte-matched against staged build. Actual production CSS/JS resource names verified through temporary loopback gateway. Public origin is OIDC protected; no new human-authenticated public-browser passkey roundtrip was performed.",
+    "webPID": 2671981,
+    "agentPID": 2714450,
+    "hubPID": 2370772
+  },
+  "backup": "/var/tmp/noah-agent-builds/token-monitor-visibility-20260911/pre-deploy-dist",
+  "screenshots": [
+    "/var/tmp/noah-agent-builds/token-monitor-visibility-20260911/deployed-visibility-desktop.png",
+    "/var/tmp/noah-agent-builds/token-monitor-visibility-20260911/deployed-visibility-mobile.png"
+  ],
+  "notes": "Per-account display preferences persist only in browser localStorage; server collection and synchronization unchanged. Derived fingerprints survive offline redaction. Anonymous same-provider rows share a visibility preference."
+}

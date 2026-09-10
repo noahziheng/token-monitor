@@ -27,7 +27,7 @@ This directory belongs to the fork deployment branch, not the upstream feature P
 
 ## Active static patch
 
-`noah-20260911.3` publishes static source `9b97baf8393dc7c6246728ad7a547bd1cf4f7b44` over the running Web release below. It fixes wrapped quota/balance card rows and bumps PWA static cache tov22. New hashed assets were copied before atomic entry-point replacement; old hashes remain available. No process, authentication setting or server code changed. See [the static patch receipt](releases/noah-20260911.3.json), including rollback location and verification scope. Full future builds from this branch include the fix.
+`noah-20260911.4` publishes static source `706fbdafa5a234e7d0e93dad6a5bee9895e3fb49` over the running Web release below, superseding the layout-only `.3` overlay. It adds per-account balance/quota card hiding, browser-local persistence, always-available management/restore controls and offline display fingerprints. PWA static cache is v23; CSS `index-Djbwuin1.css`, JS `index-DnyEDnZj.js`. New hashes were copied before atomic entry-point replacement and old hashes remain available. No process, authentication setting or server code changed. See [the static patch receipt](releases/noah-20260911.4.json), including rollback and exact browser verification scope. Future full builds from this branch include both the layout fix and visibility controls.
 
 ## Active server release
 
