@@ -5,11 +5,9 @@
 - Arkcli provider discovery/quota mapping and desktop source labels: [TokenMonitor #655](https://github.com/Javis603/token-monitor/pull/655). Runtime cherry-picks have different commit IDs but the provider implementation matches the contribution branch. Do not submit twice.
 - Optional Web dashboard/authentication/PWA: [TokenMonitor #656](https://github.com/Javis603/token-monitor/pull/656). Keep deployment-specific branch documentation/configuration out of this PR.
 
-## Hub persistence scheduler: suitable as a separate proposal
+## Hub persistence scheduler: removed
 
-Local commits `70ed91f` through `b325d2f`, retained through merge `014c5b7`, introduce leading/trailing writes, forced flush for subscription/device changes, retry and shutdown handling. There is no host-specific dependency, and extensive fake-clock, reentrancy, failure and Hub integration tests exist. This can benefit high-frequency multi-device ingest.
-
-Before proposing it, distill the implementation/tests/configuration into one focused branch from current upstream, excluding deployment plans and unrelated usage/arkcli/Web work. Explicitly discuss durability: the local default is 5000 ms, meaning acknowledged ingest can be lost on abrupt termination before flush. Prefer an opt-in interval with upstream's immediate-write default retained unless the maintainer accepts the changed durability contract. Confirm upstream Worker behavior remains unchanged and include write-count/latency measurements plus shutdown/failure tests. No new PR has been submitted by this assessment.
+Decision at 19:35: remove the downstream scheduler and restore upstream Node Hub writes. Measurements did not justify its additional configuration, retry/reentrancy lifecycle and acknowledged-update crash window. Hub implementation, tests, build-manifest inputs and operator docs now match upstream; archive branches and historical release tags preserve the prior code. No persistence PR is planned. Production still uses its existing checkout until a separately authorized rollout.
 
 ## OpenClaw SQLite and embedded Codex homes: coordinate with Tokscale
 
