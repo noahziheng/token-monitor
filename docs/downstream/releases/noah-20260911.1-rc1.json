@@ -1,0 +1,21 @@
+{
+  "release": "noah-20260911.1-rc1",
+  "status": "staged-not-activated",
+  "sourceCommit": "8622d220e39c830b5eae050da92e2713a896ea7a",
+  "contributionCommit": "c1e471d",
+  "contributionPR": "https://github.com/Javis603/token-monitor/pull/655",
+  "scope": "Agent-only candidate: accept omitted used only with numeric percent=0; retain invalid-data guards. No Web/Hub changes.",
+  "verification": {
+    "contributionPassed": 4219,
+    "localPassed": 4237,
+    "skippedPerSuite": 3,
+    "focusedPassed": 75,
+    "realCli": "ok; post-reset 5h used=0 and weekly/monthly preserved"
+  },
+  "runningComponentsUnchanged": {
+    "agent": "e9554e52ae095752bda58107ba462c41a26498de",
+    "web": "e9554e52ae095752bda58107ba462c41a26498de",
+    "hub": "eb23c8f2e5ffbf01703746910a31196bee3ae086"
+  },
+  "activation": "Not performed. Candidate staged with independent dependencies, no credentials copied. Agent-only activation and IaC pin reconciliation remain pending restart approval; do not apply the current shared Web/agent release pin to this agent-only candidate."
+}
