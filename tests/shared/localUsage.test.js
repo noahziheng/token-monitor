@@ -47,3 +47,17 @@ test('SQLite reads suppress repeated events, mirrored Codex, and old dates', () 
     assert.ok(result.sessions.has('s'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+test('Codex activity uses last token event rather than session creation or file modification', () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const { codexActivity } = require('../../src/shared/localUsage');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-activity-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'sessions'));
+    fs.writeFileSync(path.join(dir, 'sessions', 'rollout-test.jsonl'), [
+      { timestamp: '2026-09-09T01:00:00Z', type: 'session_meta' },
+      { timestamp: '2026-09-10T04:33:00Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 20 } } } },
+      { timestamp: '2026-09-10T04:35:00Z', type: 'response_item' }
+    ].map(JSON.stringify).join('\n'));
+    assert.equal(codexActivity(dir).get('rollout-test'), '2026-09-10T04:33:00Z');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
