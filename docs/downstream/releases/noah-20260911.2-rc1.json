@@ -1,0 +1,34 @@
+{
+  "release": "noah-20260911.2-rc1",
+  "status": "staged-not-activated",
+  "sourceCommit": "4ee91c078f0a5aea447e05d8c187f982679b2858",
+  "contributionCommit": "e5789c6",
+  "contributionPR": "https://github.com/Javis603/token-monitor/pull/656",
+  "component": "web",
+  "configuration": {
+    "WEB_ALLOW_HUB_CLIENTS": "1",
+    "DesktopBaseUrl": "https://tm.noahgao.net",
+    "browserAuthentication": "unchanged OIDC; read-only",
+    "clientAuthentication": "explicit Bearer forwarded to Hub; never cookie/server-secret fallback"
+  },
+  "verification": {
+    "contributionWebPassed": 110,
+    "contributionRootPassed": 4205,
+    "localWebPassed": 111,
+    "localRootPassed": 4237,
+    "rootSkippedPerSuite": 3,
+    "build": "passed both branches",
+    "stagedClientIntegrationPassed": 7,
+    "realHubCoverage": [
+      "Desktop upload/read/delete",
+      "invalid Bearer with valid cookie",
+      "OIDC client lane",
+      "disabled-by-default",
+      "subscription conflict",
+      "payload limit",
+      "SSE"
+    ],
+    "ansibleCheck": "only Web restart; changed=4 failed=0"
+  },
+  "activation": "Pending explicit Web restart approval. Candidate includes independent Web dependencies and compiled artifacts; no credentials bundled. No production upload/browser roundtrip claimed."
+}

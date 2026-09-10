@@ -36,3 +36,7 @@ This directory belongs to the fork deployment branch, not the upstream feature P
 See [the rollout receipt](releases/noah-20260911.1.json). The agent restarted at 01:27:37 CST; Hub ingest at 01:27:41 confirmed fresh Volcengine `ok` data. Web/Hub PIDs stayed unchanged. IaC independently pins the agent release, validates its immutable source marker, and retains external configuration links. Updating this branch does not deploy automatically.
 
 Published candidate and prior rollout records remain immutable. Runtime source directories remain separate from development worktrees; `sourceCommit` identifies the exact archived source rather than the documentation-only receipt commit. Old release directories remain available for rollback.
+
+## Staged Web client proxy
+
+[noah-20260911.2-rc1](releases/noah-20260911.2-rc1.json) stages source `4ee91c078f0a5aea447e05d8c187f982679b2858` for Web only. It adds opt-in same-origin Desktop/agent Bearer proxying while preserving OIDC browser read-only access. Contribution: [PR #656](https://github.com/Javis603/token-monitor/pull/656), commit `e5789c6`. Both branches passed Web/root verification and production builds. This candidate is **not activated**; the active release above is unchanged.
