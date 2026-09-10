@@ -24,3 +24,9 @@ This directory belongs to the fork deployment branch, not the upstream feature P
 ## Initial candidate
 
 `noah-20260910.1-rc1` integrates upstream `d897141`, saved runtime patches `d145ce6`, and Web `1cf3d36`. See the release JSON and contribution assessment. It has **not** replaced the current services. Existing Web/Hub/agent service directories remain unchanged; the fixed-release-directory/IaC switch is a subsequent rollout, not something this record claims has happened.
+
+## Active release
+
+`noah-20260910.1` was activated on 2026-09-10. All three services use fixed source commit `eb23c8f2e5ffbf01703746910a31196bee3ae086`; see [the rollout receipt](releases/noah-20260910.1.json). This replaces the earlier split deployment described in the immutable rc1 record. The runtime directory is separate from development worktrees. IaC pins this source commit and manages the service overrides; updating this branch does not deploy automatically.
+
+The release tag also includes this documentation-only receipt; `sourceCommit` identifies the exact archived runtime source. Protected configuration and state remain external, with old credential-source paths retained until a deliberate configuration migration. Historical candidate tags/records remain unchanged.

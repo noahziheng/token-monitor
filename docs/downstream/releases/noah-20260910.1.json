@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "release": "noah-20260910.1",
+  "sourceCommit": "eb23c8f2e5ffbf01703746910a31196bee3ae086",
+  "status": "deployed",
+  "activatedAt": "2026-09-10T19:41:42+08:00",
+  "components": {
+    "web": {
+      "sourceCommit": "eb23c8f2e5ffbf01703746910a31196bee3ae086",
+      "active": true
+    },
+    "hub": {
+      "sourceCommit": "eb23c8f2e5ffbf01703746910a31196bee3ae086",
+      "active": true
+    },
+    "agent": {
+      "sourceCommit": "eb23c8f2e5ffbf01703746910a31196bee3ae086",
+      "active": true
+    }
+  },
+  "changes": [
+    "Restore upstream Hub persistence; remove downstream scheduler",
+    "Use upstream session activity timestamps",
+    "Keep temporary OpenClaw SQLite/Codex-home and Hermes usage compatibility",
+    "Include Web PR #656 through 1cf3d36 and arkcli PR #655"
+  ],
+  "verification": {
+    "rootPassed": 4231,
+    "rootSkipped": 3,
+    "webCI": "success",
+    "codeqlCI": "success",
+    "rootCI": "still running when rollout recorded",
+    "nativeTokscale": "4.15.1 upstream npm binary validated",
+    "webBuild": "passed in release directory",
+    "actualProcessCwd": "all three match source release",
+    "freshAgentPosts": true,
+    "providerStatus": {
+      "codex": "ok",
+      "deepseek": "ok",
+      "openrouter": "ok",
+      "volcengine": "ok"
+    },
+    "publicOidc": "root -> login -> IdP, client token-monitor-web, S256",
+    "anonymousAPI": 401,
+    "authenticatedBrowserRoundTrip": "not repeated",
+    "iacCheckChanged": 0
+  },
+  "iac": {
+    "repository": "ops-stack",
+    "commit": "df8e5f5",
+    "pinFile": "ansible/vars/token-monitor-release.yml"
+  },
+  "webArtifactSha256": {
+    "web/dist/assets/index-Bz4B29Ad.js": "b2abfd5661dc92ddfcb59ae3e5123672fd358f15605318154d8cd65a477f0592",
+    "web/dist/assets/index-DsQl96gJ.css": "ca4487a764feea237de9ce94dd4e9c52751636290a3e2fb949d25d3e1b8316ca",
+    "web/dist/icons/apple-touch-icon.png": "2c4a2e0bc9ad588ffa2efc64777a612f3fc879c6b6f9d9360ccae48d3d141edd",
+    "web/dist/icons/icon-192.png": "c5191510545a0ef8110e72447afc3f8ecbedbcf530b3d9bf5916e2c7eff68844",
+    "web/dist/icons/icon-192.svg": "aaabd04bf39953f4eaa02638e33f6809a96931c973007f422796c06538bcbaf2",
+    "web/dist/icons/icon-512.png": "c44d7068a1bf52c8facbbb8bc2a4ca87570fae7c583bf167c9aab8dadc365256",
+    "web/dist/icons/icon-512.svg": "102dab126402163c91c4bf1061d82d595160fdba3cb20d13a7959d411de83ef2",
+    "web/dist/index.html": "9b6c2d78e7d02aff7cea6d6561cec827919cdecea76b07c05a98ad2d5d06f61a",
+    "web/dist/manifest.webmanifest": "807302a3febb853b537d93f6379e3e3650a19f3795663662e7f645cead345dc2",
+    "web/dist/sw.js": "48ab0b9676e4673df36814fafd18efefa929b858c07acc46f74dfbbfebbef9a1"
+  },
+  "rollback": "Prior source directories and protected pre-rollout data backup retained; preserve newly accumulated data.",
+  "scope": "Only Token Monitor Web/Hub/agent were restarted; infrastructure and Gateway unchanged."
+}
