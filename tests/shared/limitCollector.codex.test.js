@@ -1420,3 +1420,15 @@ test('LimitsRuntime compatibility snapshot probes initially and reuses the confi
   assert.equal(calls, 2);
   collector.stop();
 });
+
+test('Codex quota RPC uses supported noninteractive read-only launch flags', async () => {
+  const { readCodexRpcWithCommand } = require('../../src/shared/limitCollector');
+  let launchArgs;
+  await assert.rejects(readCodexRpcWithCommand('/test/codex', {
+    spawn: (_command, args) => {
+      launchArgs = args;
+      throw new Error('test spawn boundary');
+    }
+  }), /test spawn boundary/);
+  assert.deepEqual(launchArgs, ['-s', 'read-only', '-a', 'never', 'app-server']);
+});
