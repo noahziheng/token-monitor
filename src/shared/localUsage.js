@@ -95,60 +95,9 @@ function readHermes(dbPath) {
     });
   } finally { db.close(); }
 }
-const activityCache = new Map();
-function codexActivity(home) {
-  const result = new Map();
-  function visit(root) {
-    if (!fs.existsSync(root)) return;
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      const file = path.join(root, entry.name);
-      if (entry.isDirectory()) { visit(file); continue; }
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      const stat = fs.statSync(file);
-      let cached = activityCache.get(file);
-      if (!cached || cached.size !== stat.size || cached.mtime !== stat.mtimeMs) {
-        const fd = fs.openSync(file, 'r');
-        let timestamp;
-        try {
-          // Bounded tail read; an absent usage event is not replaced with mtime.
-          const length = Math.min(stat.size, 512 * 1024);
-          const buffer = Buffer.alloc(length);
-          fs.readSync(fd, buffer, 0, length, stat.size - length);
-          for (const line of buffer.toString('utf8').split('\n').reverse()) {
-            if (!line.includes('"token_count"')) continue;
-            try {
-              const event = JSON.parse(line);
-              if (event.type === 'event_msg' && event.payload?.type === 'token_count'
-                && event.payload.info?.total_token_usage && Number.isFinite(Date.parse(event.timestamp))) {
-                timestamp = event.timestamp; break;
-              }
-            } catch { /* The first tail line may be truncated. */ }
-          }
-        } finally { fs.closeSync(fd); }
-        cached = { size: stat.size, mtime: stat.mtimeMs, timestamp };
-        activityCache.set(file, cached);
-      }
-      if (cached.timestamp) result.set(path.basename(file, '.jsonl'), cached.timestamp);
-    }
-  }
-  visit(path.join(home, 'sessions'));
-  visit(path.join(home, 'archived_sessions'));
-  return result;
-}
-function withCodexActivity(entries, home) {
-  const activity = codexActivity(home);
-  return entries.map((entry) => {
-    const timestamp = activity.get(entry.sessionId || entry.session);
-    return timestamp ? { ...entry, lastUsedAt: timestamp } : entry;
-  });
-}
 async function augmentLocalUsage(base, { clients, flags, scanCodex, home = os.homedir(), now = Date.now(), stateFile }) {
   const selected = new Set(clients.split(','));
   let entries = base.entries || [];
-  if (selected.has('codex')) {
-    const updated = withCodexActivity(entries.filter((e) => e.client === 'codex'), process.env.CODEX_HOME || path.join(home, '.codex'));
-    entries = entries.filter((e) => e.client !== 'codex').concat(updated);
-  }
   const start = periodStart(flags, now);
   if (selected.has('openclaw')) {
     for (const agent of dirs(path.join(home, '.openclaw', 'agents'))) {
@@ -161,7 +110,7 @@ async function augmentLocalUsage(base, { clients, flags, scanCodex, home = os.ho
       const codexHome = path.join(agent, 'agent', 'codex-home');
       if (fs.existsSync(path.join(codexHome, 'sessions')) || fs.existsSync(path.join(codexHome, 'archived_sessions'))) {
         const data = await scanCodex(codexHome);
-        entries.push(...withCodexActivity(data.entries || [], codexHome).map((e) => ({ ...e, client: 'openclaw',
+        entries.push(...(data.entries || []).map((e) => ({ ...e, client: 'openclaw',
           output: number(e.output) + number(e.reasoning), reasoning: 0 }))); 
       }
     }
@@ -185,4 +134,4 @@ async function augmentLocalUsage(base, { clients, flags, scanCodex, home = os.ho
   }
   return { entries };
 }
-module.exports = { codexActivity, augmentLocalUsage, hermesPeriodRows, openclawEventRow, readOpenclaw, readHermes };
+module.exports = { augmentLocalUsage, hermesPeriodRows, openclawEventRow, readOpenclaw, readHermes };

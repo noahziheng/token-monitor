@@ -17,7 +17,7 @@ Local commits `3c01b79` and `223b744` add read-only usage metadata projection, m
 
 Checked upstream Tokscale source: release `v4.15.1` lacks `transcript_events` and `codex-home` handling in `crates/tokscale-core/src/sessions/openclaw.rs`; current `main` includes both. [Tokscale #1312](https://github.com/junhoyeo/tokscale/pull/1312) adds per-profile Codex rollout handling. The latest published release at assessment time remains `v4.15.1`. Therefore keep the opt-in compatibility adapter temporarily, and compare the next supported Tokscale release against anonymized fixtures before removing it. Do not turn it on alongside overlapping native accounting without checking deduplication.
 
-Current local adapter limitations include fixed default OpenClaw directory/schema assumptions, synchronous database/file scans, incomplete malformed-schema/date coverage, bounded-tail Codex activity extraction and an observation-file single-writer contract. New upstream work should target gaps after checking Tokscale coverage, not copy this local adapter wholesale.
+Current local adapter limitations include fixed default OpenClaw directory/schema assumptions, synchronous database/file scans, incomplete malformed-schema/date coverage, an observation-file single-writer contract. New upstream work should target gaps after checking Tokscale coverage, not copy this local adapter wholesale.
 
 ## Hermes calendar attribution: keep local pending a source contract
 
@@ -25,7 +25,7 @@ The adapter improves model attribution and avoids assigning an entire old sessio
 
 ## Codex activity and noninteractive quota probe
 
-Actual token-event time is a generally useful session-activity fix, but the local 512 KiB tail scan should not become a second unbounded file-indexing subsystem. Compare against current Tokscale Codex session parsing and add narrowly scoped fixture tests there if the gap remains.
+Decision at 19:26: remove the token-only activity override and its cache/tail scanner. Keep the existing TokenMonitor/Tokscale session-activity semantics; no separate activity contribution is planned. Hermes observation accounting is retained unchanged.
 
 The old `df152d8` change from approval `untrusted` to `never` is already present in upstream's extracted `src/shared/providers/codex/limits.js`. The redundant downstream flag test has now been removed by restoring that test file from current upstream. Historical ancestry remains, but there is no distinct implementation to contribute again.
 
