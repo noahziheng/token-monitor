@@ -1,0 +1,30 @@
+{
+  "release": "noah-20260910.2",
+  "status": "deployed",
+  "sourceCommit": "e9554e52ae095752bda58107ba462c41a26498de",
+  "components": {
+    "web": "e9554e52ae095752bda58107ba462c41a26498de",
+    "agent": "e9554e52ae095752bda58107ba462c41a26498de",
+    "hub": "eb23c8f2e5ffbf01703746910a31196bee3ae086"
+  },
+  "configuration": {
+    "agentUploadIntervalMs": 600000,
+    "newBrowserDefault": "snapshot",
+    "savedPreferences": "preserved",
+    "localCollection": "unchanged"
+  },
+  "verification": {
+    "rootPassed": 4234,
+    "rootSkipped": 3,
+    "webPassed": 104,
+    "build": "passed",
+    "agentEnvironment": "600000 verified from running process",
+    "firstPost": "confirmed",
+    "fullProductionInterval": "not yet observed",
+    "publicRoot": 303,
+    "anonymousApi": 401,
+    "authenticatedBrowser": "not repeated"
+  },
+  "iacCommit": "f3d5866",
+  "deploymentNote": "An unintended unchanged Hub restart occurred due to looped Ansible notifications. Recovered; playbook now selectively restarts changed services."
+}
