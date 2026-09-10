@@ -27,16 +27,12 @@ This directory belongs to the fork deployment branch, not the upstream feature P
 
 ## Active release
 
-`noah-20260911.1` deploys the Volcengine arkcli zero-usage fix to the agent only:
+`noah-20260911.2` enables same-origin Desktop/agent Bearer access on Web while keeping browser OIDC read-only:
 
-- Agent: `8622d220e39c830b5eae050da92e2713a896ea7a`.
-- Web: `e9554e52ae095752bda58107ba462c41a26498de` (unchanged).
+- Web: `4ee91c078f0a5aea447e05d8c187f982679b2858`.
+- Agent: `8622d220e39c830b5eae050da92e2713a896ea7a` (unchanged).
 - Hub: `eb23c8f2e5ffbf01703746910a31196bee3ae086` (unchanged).
 
-See [the rollout receipt](releases/noah-20260911.1.json). The agent restarted at 01:27:37 CST; Hub ingest at 01:27:41 confirmed fresh Volcengine `ok` data. Web/Hub PIDs stayed unchanged. IaC independently pins the agent release, validates its immutable source marker, and retains external configuration links. Updating this branch does not deploy automatically.
+See [the rollout receipt](releases/noah-20260911.2.json). Only Web restarted at01:47:51 CST with explicit authorization. The existing Desktop resumed uploading at01:47:53 and its WorkBuddy quota is current again. Anonymous/invalid-Bearer API requests return401; browser OIDC redirects remain intact. The release uses `WEB_ALLOW_HUB_CLIENTS=1`; client credentials are still validated by Hub, never replaced with Web credentials. Browser sessions require login again after the restart.
 
-Published candidate and prior rollout records remain immutable. Runtime source directories remain separate from development worktrees; `sourceCommit` identifies the exact archived source rather than the documentation-only receipt commit. Old release directories remain available for rollback.
-
-## Staged Web client proxy
-
-[noah-20260911.2-rc1](releases/noah-20260911.2-rc1.json) stages source `4ee91c078f0a5aea447e05d8c187f982679b2858` for Web only. It adds opt-in same-origin Desktop/agent Bearer proxying while preserving OIDC browser read-only access. Contribution: [PR #656](https://github.com/Javis603/token-monitor/pull/656), commit `e5789c6`. Both branches passed Web/root verification and production builds. This candidate is **not activated**; the active release above is unchanged.
+Prior candidate/rollout records are immutable history, including the prior agent-only zero-usage fix. Runtime releases remain separate from development worktrees. `sourceCommit` identifies archived runtime source, not the receipt commit; source pushes do not automatically deploy. External credentials and previous releases remain in place.
