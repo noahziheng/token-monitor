@@ -8,7 +8,8 @@ function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {
   const makeOrderedSink = deps.createOrderedSink || createOrderedSink;
   const sink = overrides.sink === undefined
     ? makeOrderedSink({
-        send: options.deliver
+        send: options.deliver,
+        minIntervalMs: options.uploadIntervalMs
       })
     : overrides.sink;
 
@@ -52,7 +53,7 @@ async function runAgentOnce(options = {}, deps = {}) {
   const dryRun = options.dryRun === true;
   const runtime = createAgentDeviceRuntime(options, deps, {
     usageOptions,
-    sink: dryRun ? null : undefined,
+    sink: dryRun ? null : (deps.createOrderedSink || createOrderedSink)({ send: options.deliver }),
     onRecord(record, meta) {
       latestRecord = record;
       options.onRecord?.(record, meta);

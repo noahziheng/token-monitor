@@ -80,7 +80,7 @@ it('defaults to browser language and system theme, tracking changes until explic
   await user.selectOptions(screen.getByRole('combobox',{name:'Theme'}),'dark');
   await act(async()=>listener());
   await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('dark'));
-  expect(JSON.parse(window.localStorage.getItem('token-monitor-preferences')!)).toEqual({language:'system',theme:'dark',mode:'live'});
+  expect(JSON.parse(window.localStorage.getItem('token-monitor-preferences')!)).toEqual({language:'system',theme:'dark',mode:'snapshot'});
 });
 
 it('offers login recovery while retrying without a cached snapshot', async () => {
@@ -89,4 +89,12 @@ it('offers login recovery while retrying without a cached snapshot', async () =>
   }));
   render(<PreferencesProvider><App /></PreferencesProvider>);
   expect((await screen.findByRole('link', {name:'重新登录'})).getAttribute('href')).toBe('/auth/login');
+});
+
+it('defaults fresh browsers to a single snapshot without SSE',async()=>{
+  window.localStorage.clear();
+  render(<PreferencesProvider><App /></PreferencesProvider>);
+  await screen.findByText('1.5K');
+  expect(defaultFetchStats).toHaveBeenCalledTimes(1);
+  expect(createLiveStats).not.toHaveBeenCalled();
 });

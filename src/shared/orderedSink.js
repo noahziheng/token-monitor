@@ -3,6 +3,9 @@
 function createOrderedSink(options = {}) {
   const send = typeof options.send === 'function' ? options.send : async () => {};
   const onError = typeof options.onError === 'function' ? options.onError : null;
+  const minIntervalMs = Math.max(0, Number(options.minIntervalMs) || 0);
+  let lastStartedAt = -Infinity;
+  let timer = null;
   let nextRevision = 0;
   let highestRevision = Number.NEGATIVE_INFINITY;
   let active = null;
@@ -21,6 +24,18 @@ function createOrderedSink(options = {}) {
       settle(entry, { sent: false, stopped: true, revision: entry.revision });
       return;
     }
+    const delay = minIntervalMs - (Date.now() - lastStartedAt);
+    if (delay > 0) {
+      pending = entry;
+      timer = setTimeout(() => {
+        timer = null;
+        const next = pending;
+        pending = null;
+        if (next) start(next);
+      }, delay);
+      return;
+    }
+    lastStartedAt = Date.now();
     active = entry;
     const task = Promise.resolve().then(() => send(entry.value, entry.revision));
     entry.task = task;
@@ -60,7 +75,7 @@ function createOrderedSink(options = {}) {
       reject = fail;
     });
     const entry = { value, revision: resolvedRevision, resolve, reject, promise, settled: false, task: null };
-    if (!active) start(entry);
+    if (!active && !timer) start(entry);
     else {
       settle(pending, { sent: false, superseded: true, revision: pending?.revision });
       pending = entry;
@@ -71,7 +86,7 @@ function createOrderedSink(options = {}) {
   async function flush() {
     while (active || pending) {
       const entry = active || pending;
-      if (!active && pending) {
+      if (!active && pending && !timer) {
         pending = null;
         start(entry);
       }
@@ -87,6 +102,8 @@ function createOrderedSink(options = {}) {
   function stop() {
     if (stopped) return;
     stopped = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
     settle(pending, { sent: false, stopped: true, revision: pending?.revision });
     pending = null;
   }

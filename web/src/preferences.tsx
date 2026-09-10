@@ -61,7 +61,7 @@ export function PreferencesProvider({children}: {children: ComponentChildren}) {
   },[]);
   const language=languageChoice==='system' ? browserLanguage : languageChoice;
   const theme=themeChoice==='system' ? (systemDark ? 'dark' : 'light') : themeChoice;
-  const [mode,setMode] = useState<DataMode>(initial.mode === 'snapshot' ? 'snapshot' : 'live');
+  const [mode,setMode] = useState<DataMode>(initial.mode === 'live' ? 'live' : 'snapshot');
   const [refreshSerial,setRefresh] = useState(0);
   useEffect(()=>{
     document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';

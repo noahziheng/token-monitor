@@ -110,6 +110,7 @@ test('normal once posts usage immediately and a changed limits record second', a
   const harness = runtimeHarness();
   const delivered = [];
   const running = runAgentOnce({
+    uploadIntervalMs: 600000,
     envelope: { deviceId: 'device-1' },
     usageOptions: {},
     limitsOptions: {},
@@ -133,6 +134,7 @@ test('dry-run once waits for bounded limits and emits one final JSON record', as
   const harness = runtimeHarness();
   const delivered = [];
   const running = runAgentOnce({
+    uploadIntervalMs: 600000,
     dryRun: true,
     envelope: { deviceId: 'device-1' },
     usageOptions: {},
@@ -156,6 +158,7 @@ test('once does not duplicate when the initial limits pass has no new publish', 
   const harness = runtimeHarness();
   const delivered = [];
   const running = runAgentOnce({
+    uploadIntervalMs: 600000,
     envelope: { deviceId: 'device-1' },
     usageOptions: {},
     limitsOptions: {},
@@ -171,6 +174,7 @@ test('once does not duplicate when the initial limits pass has no new publish', 
 test('once rejects and stops when the initial usage collection fails', async () => {
   const harness = runtimeHarness();
   const running = runAgentOnce({
+    uploadIntervalMs: 600000,
     envelope: { deviceId: 'device-1' },
     usageOptions: {},
     limitsOptions: {},
@@ -178,4 +182,29 @@ test('once rejects and stops when the initial usage collection fails', async () 
   }, harness.deps);
   harness.usageError(new Error('usage failed'));
   await assert.rejects(running, /usage failed/);
+});
+
+
+test('agent coalesces usage and limits together without slowing local updates', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  const harness = runtimeHarness();
+  const delivered = [];
+  const runtime = runAgent({
+    envelope: { deviceId: 'device-1' },
+    uploadIntervalMs: 600000,
+    deliver: async record => { delivered.push(record); }
+  }, harness.deps);
+  harness.usageUpdate(usageSummary(1));
+  await runtime.flush();
+  harness.usageUpdate(usageSummary(2));
+  harness.limitsUpdate({ updatedAt: 'new-limits', refreshMs: 300000, providers: [] });
+  harness.usageUpdate(usageSummary(3));
+  t.mock.timers.tick(599999);
+  assert.equal(delivered.length, 1);
+  t.mock.timers.tick(1);
+  await runtime.flush();
+  assert.equal(delivered.length, 2);
+  assert.equal(delivered[1].today.totalTokens, 3);
+  assert.equal(delivered[1].limits.updatedAt, 'new-limits');
+  runtime.stop();
 });

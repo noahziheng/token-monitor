@@ -114,3 +114,46 @@ test('stop discards pending records while allowing the active send to settle', a
   await first;
   assert.deepEqual(sent, [1]);
 });
+
+test('rate limit sends first immediately and only latest usage/limits at deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  const sent = [];
+  const sink = createOrderedSink({ minIntervalMs: 600000, send: async value => { sent.push(value); } });
+  await sink.enqueue('first', 1);
+  await sink.flush();
+  const older = sink.enqueue('usage', 2);
+  const latest = sink.enqueue('limits', 3);
+  assert.equal((await older).superseded, true);
+  t.mock.timers.tick(599999);
+  assert.deepEqual(sent, ['first']);
+  t.mock.timers.tick(1);
+  await latest;
+  await sink.flush();
+  assert.deepEqual(sent, ['first', 'limits']);
+  const canceled = sink.enqueue('stopped', 4);
+  sink.stop();
+  assert.equal((await canceled).stopped, true);
+  t.mock.timers.tick(600000);
+  assert.deepEqual(sent, ['first', 'limits']);
+});
+
+test('failed sends and in-flight updates still obey the upload interval', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  const gate = deferred();
+  const sent = [];
+  const sink = createOrderedSink({ minIntervalMs: 600000, send: async value => {
+    sent.push(value);
+    if (value === 1) await gate.promise;
+  } });
+  const first = sink.enqueue(1, 1);
+  await Promise.resolve();
+  const next = sink.enqueue(2, 2);
+  gate.reject(new Error('offline'));
+  await assert.rejects(first, /offline/);
+  await Promise.resolve();
+  t.mock.timers.tick(600000);
+  await next;
+  await sink.flush();
+  assert.deepEqual(sent, [1, 2]);
+  sink.stop();
+});
