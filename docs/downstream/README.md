@@ -27,6 +27,12 @@ This directory belongs to the fork deployment branch, not the upstream feature P
 
 ## Active release
 
-`noah-20260910.1` was activated on 2026-09-10. All three services use fixed source commit `eb23c8f2e5ffbf01703746910a31196bee3ae086`; see [the rollout receipt](releases/noah-20260910.1.json). This replaces the earlier split deployment described in the immutable rc1 record. The runtime directory is separate from development worktrees. IaC pins this source commit and manages the service overrides; updating this branch does not deploy automatically.
+`noah-20260911.1` deploys the Volcengine arkcli zero-usage fix to the agent only:
 
-The release tag also includes this documentation-only receipt; `sourceCommit` identifies the exact archived runtime source. Protected configuration and state remain external, with old credential-source paths retained until a deliberate configuration migration. Historical candidate tags/records remain unchanged.
+- Agent: `8622d220e39c830b5eae050da92e2713a896ea7a`.
+- Web: `e9554e52ae095752bda58107ba462c41a26498de` (unchanged).
+- Hub: `eb23c8f2e5ffbf01703746910a31196bee3ae086` (unchanged).
+
+See [the rollout receipt](releases/noah-20260911.1.json). The agent restarted at 01:27:37 CST; Hub ingest at 01:27:41 confirmed fresh Volcengine `ok` data. Web/Hub PIDs stayed unchanged. IaC independently pins the agent release, validates its immutable source marker, and retains external configuration links. Updating this branch does not deploy automatically.
+
+Published candidate and prior rollout records remain immutable. Runtime source directories remain separate from development worktrees; `sourceCommit` identifies the exact archived source rather than the documentation-only receipt commit. Old release directories remain available for rollback.
