@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "release": "noah-20260910.1-rc1",
+  "status": "validated-candidate-not-deployed",
+  "integratedSourceCommit": "fc4e98fc95c9a943b63ad1e8dd65d1a20799225b",
+  "upstreamCommit": "d897141484ecbfa44e334f7fe54ef1127afe3751",
+  "runtimePatchCommit": "d145ce6bd04797903fe9b9f795492f6c51e02ca4",
+  "webContributionCommit": "1cf3d36008bd48d6449cd2f37a99a71e7e6a2dd7",
+  "arkcliContributionCommit": "85c807141b9ae6011564cfe3a97cb2b53b1af422",
+  "verification": {
+    "node": "v26.5.0",
+    "npm": "11.17.0",
+    "root": {
+      "passed": 4274,
+      "skipped": 3,
+      "failed": 0
+    },
+    "web": {
+      "passed": 103,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "webBuild": "passed",
+    "hubRegistry": "current; Worker closure synchronized"
+  },
+  "webArtifactSha256": {
+    "web/dist/assets/index-Bz4B29Ad.js": "b2abfd5661dc92ddfcb59ae3e5123672fd358f15605318154d8cd65a477f0592",
+    "web/dist/assets/index-DsQl96gJ.css": "ca4487a764feea237de9ce94dd4e9c52751636290a3e2fb949d25d3e1b8316ca",
+    "web/dist/icons/apple-touch-icon.png": "2c4a2e0bc9ad588ffa2efc64777a612f3fc879c6b6f9d9360ccae48d3d141edd",
+    "web/dist/icons/icon-192.png": "c5191510545a0ef8110e72447afc3f8ecbedbcf530b3d9bf5916e2c7eff68844",
+    "web/dist/icons/icon-192.svg": "aaabd04bf39953f4eaa02638e33f6809a96931c973007f422796c06538bcbaf2",
+    "web/dist/icons/icon-512.png": "c44d7068a1bf52c8facbbb8bc2a4ca87570fae7c583bf167c9aab8dadc365256",
+    "web/dist/icons/icon-512.svg": "102dab126402163c91c4bf1061d82d595160fdba3cb20d13a7959d411de83ef2",
+    "web/dist/index.html": "9b6c2d78e7d02aff7cea6d6561cec827919cdecea76b07c05a98ad2d5d06f61a",
+    "web/dist/manifest.webmanifest": "807302a3febb853b537d93f6379e3e3650a19f3795663662e7f645cead345dc2",
+    "web/dist/sw.js": "48ab0b9676e4673df36814fafd18efefa929b858c07acc46f74dfbbfebbef9a1"
+  },
+  "priorDeployment": {
+    "webSourceCommit": "355befaa8fc32e604a9b5d64b33669111bea248e",
+    "hubAgentSourceCheckoutCommit": "d145ce6bd04797903fe9b9f795492f6c51e02ca4",
+    "note": "Source checkouts observed; Hub/agent process-loaded commit is not independently attested. No service configuration changed or services restarted for this candidate."
+  },
+  "rollout": {
+    "activated": false,
+    "fixedReleaseDirectory": null,
+    "iacPinned": false
+  }
+}

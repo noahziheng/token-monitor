@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['web/**', 'src/shared/**', '.github/workflows/web.yml']
   push:
-    branches: [main]
+    branches: [main, deploy/noah]
     paths: ['web/**', 'src/shared/**', '.github/workflows/web.yml']
 permissions:
   contents: read

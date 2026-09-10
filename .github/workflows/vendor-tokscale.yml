@@ -27,7 +27,7 @@ name: Vendored tokscale
 
 on:
   push:
-    branches: [main]
+    branches: [main, deploy/noah]
     paths: &vendor_tokscale_paths
       - 'scripts/vendor/tokscale.json'
       - 'scripts/ensure-vendored-tokscale.js'
