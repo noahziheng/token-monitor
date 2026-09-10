@@ -433,7 +433,15 @@ function runTokscale({ clients, flags, commandTimeoutMs, signal, terminationOpti
         onTerminationUnconfirmed
       })
     ))
-  ), signal);
+  ), signal).then((base) => {
+    if (process.env.TOKEN_MONITOR_LOCAL_SQLITE_USAGE !== '1') return base;
+    return require('./localUsage').augmentLocalUsage(base, {
+      clients: clientFilter, flags,
+      stateFile: path.join(require('./config').sharedDataDir(), 'hermes-usage-observations.json'),
+      scanCodex: (codexHome) => spawnTokscaleJson(runArgs('codex'), commandTimeoutMs,
+        { ...command, env: { ...command.env, CODEX_HOME: codexHome } }, signal, subprocessOptions)
+    });
+  });
 }
 
 function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed }) {
