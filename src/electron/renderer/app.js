@@ -3,7 +3,11 @@
 // Client identity — ids, labels and display order — comes from the shared
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
-const { CLIENT_IDS, CLIENT_LABELS: clientLabels, KNOWN_CLIENT_LIST: KNOWN_CLIENTS } = window.TokenMonitorClientCatalog;
+const {
+  CLIENT_IDS,
+  CLIENT_LABELS: clientLabels,
+  KNOWN_CLIENT_LIST: KNOWN_CLIENTS
+} = window.TokenMonitorClientCatalog;
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
@@ -19,8 +23,8 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
-  'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
+  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
 ]);
 // Limits rows mark more ids than there are tracked clients: every provider, plus
 // relay ids that only ever appear as a limits row and have no catalog entry.
@@ -312,6 +316,7 @@ state.clientRescans = clientRescanStateApi.createClientRescanState({
 state.toolPreferenceRenderSignature = '';
 state.toolPreferenceDetailSignature = '';
 state.toolPreferenceSourceSignature = '';
+state.customScanPathErrors = new Map();
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
@@ -500,10 +505,6 @@ function toggleAccordionRow(row) {
     renderActiveToolDetail();
   }
   renderToolDetailFooter();
-}
-
-function setAttributeIfChanged(element, name, value) {
-  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
 }
 
 document.addEventListener('click', (event) => {
@@ -827,6 +828,9 @@ const liveTokenRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
   activeMs: LIVE_TOKEN_RATE_ACTIVE_MS,
   clearMs: LIVE_TOKEN_RATE_CLEAR_MS
 });
+const displayLiveTokenRateTrackers = new Map();
+const displayLiveTokenRateContexts = new Map();
+let displayLiveTokenRateExpiryTimer = null;
 let liveTokenRateContext = '';
 let liveTokenRateIdleTimer = null;
 let liveTokenRateAnimationTimer = null;
@@ -862,6 +866,113 @@ function resetLiveTokenRateTracking() {
   liveTokenRateRenderedRevision = 0;
   liveTokenRateTracker.reset();
   clearLiveTokenRateTimers();
+}
+
+function displayLiveTokenRateItems() {
+  return trayLayoutApi.liveTokenRateItemsForSurfaces([
+    {
+      enabled: state.settings?.showTrayIcon !== false,
+      content: state.settings?.trayContent,
+      layout: state.settings?.trayCustomLayout
+    },
+    {
+      enabled: state.settings?.floatingBubbleEnabled === true,
+      content: state.settings?.floatingBubbleContent,
+      layout: state.settings?.floatingBubbleCustomLayout
+    }
+  ]);
+}
+
+function effectiveDisplayLiveTokenRateScope(scope) {
+  const hubMode = state.settings?.hubMode;
+  const syncMode = hubMode === 'client' || hubMode === 'host';
+  return syncMode && scope === 'all' ? 'all' : 'device';
+}
+
+function clearDisplayLiveTokenRateExpiryTimer() {
+  if (displayLiveTokenRateExpiryTimer) clearTimeout(displayLiveTokenRateExpiryTimer);
+  displayLiveTokenRateExpiryTimer = null;
+}
+
+function scheduleDisplayLiveTokenRateExpiry() {
+  clearDisplayLiveTokenRateExpiryTimer();
+  const expiries = [...displayLiveTokenRateTrackers.values()]
+    .map((tracker) => tracker.nextExpiryAt())
+    .filter((value) => Number.isFinite(value));
+  if (!expiries.length) return;
+  displayLiveTokenRateExpiryTimer = setTimeout(() => {
+    displayLiveTokenRateExpiryTimer = null;
+    void maybeUpdateBarsIcon({ refreshComposers: false });
+    renderFloatingBubbleContent();
+    if (isSettingsSurfaceVisible()) refreshTrayComposers();
+    scheduleDisplayLiveTokenRateExpiry();
+  }, Math.max(0, Math.min(...expiries) - Date.now()) + 10);
+}
+
+function resetDisplayLiveTokenRateTracking() {
+  displayLiveTokenRateTrackers.clear();
+  displayLiveTokenRateContexts.clear();
+  clearDisplayLiveTokenRateExpiryTimer();
+}
+
+function observeDisplayLiveTokenRates(stats) {
+  const items = displayLiveTokenRateItems();
+  if (!items.length) {
+    resetDisplayLiveTokenRateTracking();
+    return false;
+  }
+
+  const scopes = new Set(items.map((item) => effectiveDisplayLiveTokenRateScope(item.rateScope)));
+  let changed = false;
+  for (const scope of scopes) {
+    const selection = tokenRateApi.selectLiveTokenRatePeriods(
+      stats,
+      state.settings?.deviceId,
+      state.settings?.hubMode,
+      scope
+    );
+    const context = [
+      state.mode,
+      state.settings?.hubMode || '',
+      state.settings?.hubUrl || '',
+      state.settings?.deviceId || '',
+      state.settings?.clients || '',
+      scope,
+      selection.source
+    ].join('|');
+    let tracker = displayLiveTokenRateTrackers.get(scope);
+    if (!tracker) {
+      tracker = tokenRateApi.createLiveTokenRateGroupTracker({
+        now: () => Date.now(),
+        activeMs: LIVE_TOKEN_RATE_ACTIVE_MS,
+        clearMs: LIVE_TOKEN_RATE_CLEAR_MS
+      });
+      displayLiveTokenRateTrackers.set(scope, tracker);
+    }
+    if (displayLiveTokenRateContexts.get(scope) !== context) {
+      displayLiveTokenRateContexts.set(scope, context);
+      tracker.reset(selection.entries);
+      changed = true;
+    } else {
+      changed = tracker.observe(selection.entries).changed || changed;
+    }
+  }
+  for (const scope of [...displayLiveTokenRateTrackers.keys()]) {
+    if (scopes.has(scope)) continue;
+    displayLiveTokenRateTrackers.delete(scope);
+    displayLiveTokenRateContexts.delete(scope);
+    changed = true;
+  }
+  scheduleDisplayLiveTokenRateExpiry();
+  return changed;
+}
+
+function displayLiveTokenRateSamples() {
+  const device = displayLiveTokenRateTrackers.get('device')?.getSample() || null;
+  const all = effectiveDisplayLiveTokenRateScope('all') === 'all'
+    ? displayLiveTokenRateTrackers.get('all')?.getSample() || null
+    : device;
+  return { all, device };
 }
 
 function scheduleLiveTokenRateExpiry() {
@@ -1096,11 +1207,17 @@ function syncCurrencyRateControls() {
 }
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
-function formatReset(value) {
-  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(value);
+function formatLimitBoundary(window) {
+  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(window?.resetsAt);
   if (diffMs === null) return '';
-  if (diffMs === 0) return 'Reset now';
-  return `Reset ${formatDuration(diffMs)}`;
+  const mixed = window?.boundaryKind === 'mixed';
+  const prefix = window?.boundaryKind === 'expiry'
+    ? 'Expires'
+    : mixed
+      ? 'Changes in'
+      : 'Reset';
+  if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
+  return `${prefix} ${formatDuration(diffMs)}`;
 }
 function formatDuration(ms) {
   const totalMinutes = Math.max(0, Math.round(ms / 60000));
@@ -1922,17 +2039,66 @@ function animateCachedLimitBarsFromZero() {
 }
 
 function rowTemplate(rowData) {
-  const { key, name, platform, client, subtitle, detail, kind } = rowData;
+  const { key, name, platform, client, subtitle, activity, detail, kind } = rowData;
   const row = document.createElement('div');
   row.dataset.key = key;
   if (platform) row.dataset.platform = platform;
   if (client) row.dataset.client = client;
   if (kind) row.dataset.kind = kind;
-  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
+  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
+  row.querySelector('.row-activity').textContent = activity || '';
   row.querySelector('.row-detail').textContent = detail || '';
+  bindHoverMarquee(row.querySelector('.row-title'));
+  bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
+}
+
+const hoverMarqueeStates = new WeakMap();
+
+function stopHoverMarquee(element, { reset = true } = {}) {
+  const motion = hoverMarqueeStates.get(element);
+  if (motion?.delayId) clearTimeout(motion.delayId);
+  if (motion?.frameId) cancelAnimationFrame(motion.frameId);
+  hoverMarqueeStates.delete(element);
+  element.classList.remove('is-hover-scrolling');
+  if (reset) element.scrollLeft = 0;
+}
+
+function startHoverMarquee(element) {
+  stopHoverMarquee(element);
+  if (prefersReducedMotion() || !element.closest('.session-mode')) return;
+  const distance = Math.ceil(element.scrollWidth - element.clientWidth);
+  if (distance <= 1) return;
+
+  const motion = { delayId: 0, frameId: 0 };
+  hoverMarqueeStates.set(element, motion);
+  motion.delayId = setTimeout(() => {
+    motion.delayId = 0;
+    element.classList.add('is-hover-scrolling');
+    const startedAt = performance.now();
+    const duration = Math.max(1800, Math.min(8000, distance * 22));
+    const step = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      element.scrollLeft = distance * progress;
+      if (progress < 1) motion.frameId = requestAnimationFrame(step);
+      else motion.frameId = 0;
+    };
+    motion.frameId = requestAnimationFrame(step);
+  }, 240);
+}
+
+function bindHoverMarquee(element) {
+  element.addEventListener('mouseenter', () => startHoverMarquee(element));
+  element.addEventListener('mouseleave', () => stopHoverMarquee(element));
+}
+
+function setHoverMarqueeText(element, value) {
+  stopHoverMarquee(element);
+  const text = value || '';
+  element.textContent = text;
+  element.removeAttribute('title');
 }
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
@@ -2131,7 +2297,7 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
-function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
@@ -2147,11 +2313,17 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
+  if (reviewGroup === true) row.dataset.reviewGroup = 'true';
+  else delete row.dataset.reviewGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
+  const interactive = reviewGroup === true || (
+    kind === 'session'
+    && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2161,12 +2333,15 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
     mark.className = 'row-mark dot';
     mark.style.background = color;
   }
-  row.querySelector('.row-title').textContent = name;
+  setHoverMarqueeText(row.querySelector('.row-title'), name);
   const subtitleEl = row.querySelector('.row-subtitle');
   subtitleEl.textContent = subtitle || '';
   subtitleEl.classList.toggle('hidden', !subtitle);
+  const activityEl = row.querySelector('.row-activity');
+  activityEl.textContent = activity || '';
+  activityEl.classList.toggle('hidden', !activity);
   const detailEl = row.querySelector('.row-detail');
-  detailEl.textContent = detail || '';
+  setHoverMarqueeText(detailEl, detail);
   detailEl.classList.toggle('hidden', !detail);
   const valueEl = row.querySelector('.row-value');
   if (tokenDataUnavailable === true) {
@@ -2244,29 +2419,19 @@ function updateRow(row, { name, subtitle, detail, value, cost, barValue, max, co
     row.classList.remove('expanded');
   }
   const rowHead = row.querySelector('.row-head');
-  if (row.classList.contains('has-accordion')) {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.tabIndex !== 0) rowHead.tabIndex = 0;
-    setAttributeIfChanged(rowHead, 'role', 'button');
-    setAttributeIfChanged(rowHead, 'aria-expanded', String(row.classList.contains('expanded')));
-    const tokenLabel = tokenDataUnavailable === true
-      ? (t('detailTokenUnavailable') || 'Unavailable')
-      : formatNumber(value);
-    const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
-    setAttributeIfChanged(rowHead, 'aria-label', `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`);
-  } else {
-    if (row.hasAttribute('tabindex')) row.removeAttribute('tabindex');
-    if (row.hasAttribute('role')) row.removeAttribute('role');
-    if (row.hasAttribute('aria-expanded')) row.removeAttribute('aria-expanded');
-    if (row.hasAttribute('aria-label')) row.removeAttribute('aria-label');
-    if (rowHead.hasAttribute('tabindex')) rowHead.removeAttribute('tabindex');
-    if (rowHead.hasAttribute('role')) rowHead.removeAttribute('role');
-    if (rowHead.hasAttribute('aria-expanded')) rowHead.removeAttribute('aria-expanded');
-    if (rowHead.hasAttribute('aria-label')) rowHead.removeAttribute('aria-label');
-  }
+  const hasAccordion = row.classList.contains('has-accordion');
+  const tokenLabel = tokenDataUnavailable === true
+    ? (t('detailTokenUnavailable') || 'Unavailable')
+    : formatNumber(value);
+  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
+    interactive,
+    hasAccordion,
+    expanded: row.classList.contains('expanded'),
+    ariaLabel: hasAccordion
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      : name
+  });
 }
 
 function applyHomeListMark(mark, iconKind, color) {
@@ -2499,7 +2664,17 @@ function sessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
-  if (rows.length > 0) return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+  if (rows.length > 0) {
+    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+    return sessionRowsApi.groupBackgroundReviewRows(rows, {
+      label: t('sessions.backgroundReviews'),
+      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
+      summaryLabel: ({ latestTime, latestValue }) => [
+        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
+        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+      ].filter(Boolean).join(' · ')
+    });
+  }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -4697,7 +4872,7 @@ function limitWindowNode(label, window, color, tone = 1, valueOverride = null, d
   const reset = document.createElement('div');
   reset.className = 'limit-reset';
   const resetText = window?.resetsAt
-    ? formatReset(window.resetsAt)
+    ? formatLimitBoundary(window)
     : window?.resetDescription || '';
   if (detailText) {
     // Keep the reset text left-aligned (consistent with every other provider)
@@ -5660,20 +5835,38 @@ function codexResetForecastType(value) {
 function codexResetForecastTooltip(forecast) {
   const entries = [];
   const disclaimer = t('limits.codexResetForecast.disclaimer');
-  const latestResetType = codexResetForecastType(forecast?.latestResetType);
-  if (latestResetType) {
-    entries.push([t('limits.codexResetForecast.resetType'), latestResetType]);
+  const resetType = codexResetForecastType(
+    forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
+  );
+  if (resetType) {
+    entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+  }
+  const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
+  const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
+  if (scheduledFor) {
+    entries.push([
+      t('limits.codexResetForecast.scheduledFor'),
+      [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+    ]);
   }
   const latestReset = codexResetForecastDate(forecast?.latestResetAt);
   if (latestReset) {
     const age = codexResetForecastAge(forecast.latestResetAt);
     entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
   }
+  const sourceObservedAt = forecast?.status === 'scheduled'
+    ? forecast?.scheduledAnnouncedAt
+    : forecast?.observedAt;
   const source = [
     codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-    codexResetForecastAge(forecast?.observedAt)
+    codexResetForecastAge(sourceObservedAt)
   ].filter(Boolean).join(' · ');
-  if (source) entries.push([t('limits.codexResetForecast.sourceSignal'), source]);
+  if (source) {
+    const sourceLabel = forecast?.status === 'scheduled'
+      ? 'limits.codexResetForecast.sourceAnnouncement'
+      : 'limits.codexResetForecast.sourceSignal';
+    entries.push([t(sourceLabel), source]);
+  }
   const expiresAt = codexResetForecastDate(forecast?.expiresAt);
   const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
   if (expiresAt) {
@@ -5740,6 +5933,18 @@ function renderCodexResetForecast() {
   if (state.codexResetForecastBusy && !forecast) {
     item.classList.add('is-loading');
     value.textContent = t('limits.codexResetForecast.loading');
+  } else if (forecast?.status === 'scheduled') {
+    value.textContent = t('limits.codexResetForecast.scheduled');
+    const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
+    const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
+    detail.textContent = [
+      scheduledFor
+        ? t('limits.codexResetForecast.expected', {
+            date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+          })
+        : t('limits.codexResetForecast.schedulePending'),
+      forecast.stale ? t('limits.codexResetForecast.stale') : ''
+    ].filter(Boolean).join(' · ');
   } else if (forecast?.status === 'active' && !expired) {
     const chance = forecast.chancePercent;
     value.textContent = Number.isFinite(chance)
@@ -5749,7 +5954,7 @@ function renderCodexResetForecast() {
     const expiresAt = codexResetForecastDate(forecast.expiresAt);
     detail.textContent = [
       predictedAt
-        ? t('limits.codexResetForecast.expectedReset', { date: predictedAt })
+        ? t('limits.codexResetForecast.expected', { date: predictedAt })
         : (expiresAt || ''),
       forecast.stale ? t('limits.codexResetForecast.stale') : ''
     ].filter(Boolean).join(' · ');
@@ -6569,8 +6774,8 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title }) {
-  const request = { client, sessionId, sessionCost, title, period: state.period, detail: null };
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+  const request = { kind: 'session', client, sessionId, sessionCost, title, period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -6598,6 +6803,16 @@ function closeSessionDetail() {
   render();
 }
 
+function sessionDetailBack() {
+  const returnTo = state.openSession?.returnTo;
+  if (returnTo?.kind === 'background-review-group') {
+    state.openSession = returnTo;
+    renderBackgroundReviewDetail(returnTo);
+    return;
+  }
+  closeSessionDetail();
+}
+
 function renderSessionDetail({ detail, loading, error } = {}) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6610,7 +6825,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   const back = document.createElement('button');
   back.className = 'detail-back';
   back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
-  back.addEventListener('click', closeSessionDetail);
+  back.addEventListener('click', sessionDetailBack);
   head.append(back);
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
@@ -6630,6 +6845,71 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max));
+}
+
+function backgroundReviewRunNode(row, max, parent) {
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-exchange background-review-run';
+  wrap.setAttribute('role', 'button');
+  wrap.setAttribute('tabindex', '0');
+  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
+    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
+    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
+    + '<div class="bar"><div class="bar-fill"></div></div>';
+  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
+  wrap.querySelector('.detail-ex-title').textContent = time || t('sessions.backgroundReviews');
+  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
+  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
+  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
+  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
+  const open = () => openSessionDetail({
+    client: row.client,
+    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
+    sessionCost: Number(row.cost || 0),
+    title: `${t('sessions.backgroundReviews')} · ${time}`,
+    returnTo: parent
+  });
+  wrap.addEventListener('click', open);
+  wrap.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    open();
+  });
+  return wrap;
+}
+
+function renderBackgroundReviewDetail(request) {
+  els.breakdown.classList.add('hidden');
+  els.sessionDetail.classList.remove('hidden');
+  els.sessionDetailHead.classList.remove('hidden');
+  const head = els.sessionDetailHead;
+  const container = els.sessionDetail;
+  head.replaceChildren();
+  container.replaceChildren();
+
+  const back = document.createElement('button');
+  back.className = 'detail-back';
+  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
+  back.addEventListener('click', closeSessionDetail);
+  const heading = document.createElement('strong');
+  heading.className = 'detail-heading';
+  heading.textContent = t('sessions.backgroundReviews');
+  head.append(back, heading);
+
+  const rows = request?.summary?.backgroundReviewRows || [];
+  if (rows.length === 0) {
+    container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
+    return;
+  }
+  const overview = document.createElement('div');
+  overview.className = 'background-review-overview';
+  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
+  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
+  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  container.append(overview);
+
+  const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
+  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
 }
 
 function detailNote(text) {
@@ -7488,9 +7768,8 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
-      const resetAt = formatReset(window.resetsAt);
       const resetLabel = window.resetsAt
-        ? resetAt || ''
+        ? formatLimitBoundary(window) || ''
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '';
@@ -8208,6 +8487,11 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
+    if (state.openSession.kind === 'background-review-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+      if (latest) state.openSession.summary = latest;
+      renderBackgroundReviewDetail(state.openSession);
+    }
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
@@ -8366,6 +8650,7 @@ async function refreshStats(options = {}) {
     const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
     observeLiveTokenRate(nextStats);
     state.stats = nextStats;
+    observeDisplayLiveTokenRates(nextStats);
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -8978,7 +9263,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   ensureServiceStatusTicker();
 }
 
-const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'custom'];
+const BUBBLE_CONTENT_VALUES = ['icon', 'tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'custom'];
 function normalizeTrayContentValue(value) {
   return BUBBLE_CONTENT_VALUES.includes(value) ? value : 'icon';
 }
@@ -9805,7 +10090,7 @@ function syncSettingsForm() {
   els.trayModeInput.disabled = !showTrayIcon;
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
   syncHideAppIconControl(showTrayIcon, els.trayModeInput.checked);
-  els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
+  els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
   els.trayContentInput.disabled = !showTrayIcon;
   els.showTrayProviderBadgeInput.checked = state.settings.showTrayProviderBadge === true;
   els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
@@ -10945,9 +11230,102 @@ function friendlyPath(dir) {
   return clientHealthPresentationApi.friendlyPath(dir, state.appInfo?.homeDir, state.appInfo?.platform);
 }
 
+let customScanPathMutationQueue = Promise.resolve();
+
+function customScanPathsForClient(clientId) {
+  const paths = state.settings?.customScanPaths?.[clientId];
+  return Array.isArray(paths) ? paths : [];
+}
+
+function queueCustomScanPathMutation(operation) {
+  const queued = customScanPathMutationQueue.then(operation, operation);
+  // A rejected mutation must not poison the queue. The caller still receives
+  // the original result while the retained tail always permits the next edit.
+  customScanPathMutationQueue = queued.catch(() => {});
+  return queued;
+}
+
+function customScanPathErrorKey(error) {
+  const message = String(error?.message || error || '');
+  if (message.includes('custom-scan-path-limit-per-client')) {
+    return 'settings.tools.health.customSourcePerClientLimit';
+  }
+  if (message.includes('custom-scan-path-limit-global')) {
+    return 'settings.tools.health.customSourceGlobalLimit';
+  }
+  return 'settings.tools.health.customSourceError';
+}
+
+function mutateCustomScanPaths(clientId, mutation, options = {}) {
+  return queueCustomScanPathMutation(async () => {
+    try {
+      // Read inside the queue so every operation starts from the settings
+      // returned by the preceding save, including edits for another client.
+      const current = customScanPathsForClient(clientId);
+      const next = mutation(current);
+      if (!Array.isArray(next)) return;
+      const customScanPaths = { ...(state.settings?.customScanPaths || {}) };
+      if (next.length > 0) customScanPaths[clientId] = next;
+      else delete customScanPaths[clientId];
+      const patch = { customScanPaths };
+      if (options.enableClient === true) {
+        const tracked = enabledClientSet();
+        if (!tracked.has(clientId)) patch.clients = [...tracked, clientId].join(',');
+      }
+      await saveSettings(patch);
+      state.customScanPathErrors.delete(clientId);
+      resetClientSourceProbe(clientId);
+      loadClientSources(clientId, { force: true });
+      refillOpenClientHealthPanel();
+    } catch (error) {
+      state.customScanPathErrors.set(clientId, customScanPathErrorKey(error));
+      refillOpenClientHealthPanel();
+    }
+  });
+}
+
+function customSourceIcon(kind) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const first = document.createElementNS(svg.namespaceURI, 'path');
+  first.setAttribute('d', kind === 'add' ? 'M8 3v10' : 'M4 4l8 8');
+  const second = document.createElementNS(svg.namespaceURI, 'path');
+  second.setAttribute('d', kind === 'add' ? 'M3 8h10' : 'M12 4l-8 8');
+  svg.append(first, second);
+  return svg;
+}
+
+function resetClientSourceProbe(clientId) {
+  state.clientSources?.entries?.delete(clientId);
+  state.clientSourcesKey = '';
+  state.clientSourcesRequest += 1;
+}
+
+async function addCustomScanPath(clientId) {
+  try {
+    const result = await window.tokenMonitor?.pickCustomScanPath?.(clientId);
+    if (result?.canceled) return;
+    if (!result?.ok || !result.dir) throw new Error(result?.error || 'pick-failed');
+    await mutateCustomScanPaths(clientId, (current) => (
+      current.includes(result.dir) ? null : [...current, result.dir]
+    ), { enableClient: true });
+  } catch (error) {
+    state.customScanPathErrors.set(clientId, customScanPathErrorKey(error));
+    refillOpenClientHealthPanel();
+  }
+}
+
+async function removeCustomScanPath(clientId, dir) {
+  await mutateCustomScanPaths(clientId, (current) => {
+    const remaining = current.filter((entry) => entry !== dir);
+    return remaining.length === current.length ? null : remaining;
+  });
+}
+
 // Values are formatted here and nowhere else — the presentation helper returns
 // three semantic groups containing only raw numbers, timestamps and i18n keys.
-function clientHealthGroup(group, notes) {
+function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
   const heading = document.createElement('h4');
@@ -10957,24 +11335,62 @@ function clientHealthGroup(group, notes) {
   body.className = 'tool-health-group-body';
 
   if (group.id === 'source') {
+    section.append(heading);
+    const summaryRow = document.createElement('div');
+    summaryRow.className = 'tool-health-source-summary-row';
     const summary = document.createElement('div');
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.source.${group.state}`, {
       detected: group.detectedCount,
       checked: group.checkedCount
     });
-    body.append(summary);
+    summaryRow.append(summary);
+    if (state.appInfo?.customScanClientIds?.includes(clientId)) {
+      const addSource = document.createElement('button');
+      addSource.type = 'button';
+      addSource.className = 'tool-health-source-control tool-health-source-add';
+      addSource.title = t('settings.tools.health.addCustomSource');
+      addSource.setAttribute('aria-label', addSource.title);
+      addSource.append(customSourceIcon('add'));
+      const label = document.createElement('span');
+      label.textContent = addSource.title;
+      addSource.append(label);
+      addSource.addEventListener('click', () => { void addCustomScanPath(clientId); });
+      summaryRow.append(addSource);
+    }
+    body.append(summaryRow);
+    const customSourceError = state.customScanPathErrors.get(clientId);
+    if (customSourceError) {
+      const error = document.createElement('div');
+      error.className = 'tool-health-group-meta tool-health-source-error';
+      error.setAttribute('role', 'status');
+      error.textContent = t(customSourceError);
+      body.append(error);
+    }
     if (group.checks.length > 0) {
       const list = document.createElement('div');
       list.className = 'tool-health-checks';
       for (const check of group.checks) {
         const paths = check.paths?.length ? check.paths : [{ dir: '', exists: check.exists }];
         for (const pathInfo of paths) {
+          const row = document.createElement('div');
+          row.className = 'tool-health-check-row';
           const chip = document.createElement('code');
           chip.className = `tool-health-check${pathInfo.exists ? ' found' : pathInfo.pending ? ' pending' : ''}`;
           chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
           if (pathInfo.dir) chip.title = pathInfo.dir;
-          list.append(chip);
+          row.append(chip);
+          if (pathInfo.custom) {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'tool-health-source-control tool-health-source-remove';
+            remove.title = t('settings.tools.health.removeCustomSource');
+            remove.setAttribute('aria-label', `${remove.title}: ${friendlyPath(pathInfo.dir)}`);
+            remove.append(customSourceIcon('remove'));
+            remove.addEventListener('click', () => { void removeCustomScanPath(clientId, pathInfo.dir); });
+            row.append(remove);
+          }
+          list.append(row);
         }
       }
       body.append(list);
@@ -11043,7 +11459,8 @@ function clientHealthGroup(group, notes) {
     line.textContent = t(`settings.tools.health.code.${note.code}`);
     body.append(line);
   }
-  section.append(heading, body);
+  if (group.id !== 'source') section.append(heading);
+  section.append(body);
   return section;
 }
 
@@ -11168,7 +11585,8 @@ function clientHealthPanel(detail, clientId) {
   for (const group of detail.groups) {
     groups.append(clientHealthGroup(
       group,
-      detail.notes.filter((note) => note.group === group.id)
+      detail.notes.filter((note) => note.group === group.id),
+      clientId
     ));
   }
   box.append(groups, clientHealthActions(clientId, detail));
@@ -11315,7 +11733,8 @@ function toolPreferenceRenderSignature() {
       state.settings?.clientDisplayOrder || '',
       state.settings?.locale || state.settings?.language || '',
       state.settings?.currency || '',
-      state.settings?.compactTokenUnits || ''
+      state.settings?.compactTokenUnits || '',
+      JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),
     deviceId: device?.deviceId || '',
@@ -12406,7 +12825,17 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      openSessionDetail(state.openSession);
+      if (state.openSession.kind === 'background-review-group') {
+        const period = state.stats?.periods?.[state.period];
+        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        if (summary) {
+          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+        } else {
+          state.openSession = null;
+        }
+      } else {
+        openSessionDetail({ ...state.openSession, returnTo: null });
+      }
     } else if (state.openSession) {
       state.openSession = null;
     }
@@ -12483,6 +12912,16 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
+  if (rowEl.dataset.reviewGroup === 'true') {
+    const period = state.stats?.periods?.[state.period];
+    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    if (summary) {
+      const request = { kind: 'background-review-group', period: state.period, summary };
+      state.openSession = request;
+      renderBackgroundReviewDetail(request);
+    }
+    return;
+  }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
@@ -12500,6 +12939,10 @@ els.breakdown.addEventListener('click', (event) => {
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
     title: rowEl.querySelector('.row-title')?.textContent || ''
   });
+});
+
+els.breakdown.addEventListener('keydown', (event) => {
+  sessionRowsApi.handleBreakdownRowKeydown(event);
 });
 
 els.pinButton.addEventListener('click', (event) => {
@@ -13136,6 +13579,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   state.settingsPushRevision += 1;
   state.settings = next;
   applyEffectiveCurrencyRates();
+  observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
   if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
   maybeUpdateBarsIcon();
@@ -13263,6 +13707,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = overlayAllTimeSessions(payload.data.stats);
     observeLiveTokenRate(state.stats);
+    observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
@@ -13997,7 +14442,9 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     ...compactTokenDisplayOptions(),
     nowMs: Date.now(),
     activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
-    availableProviderIds: Object.keys(trayProviderImages)
+    availableProviderIds: Object.keys(trayProviderImages),
+    liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
+    liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value))
   });
   const items = resolved.items.map((item) => (
     item.type === 'text'
@@ -14028,7 +14475,26 @@ function barsDataUrlForMode(mode, size = 44, colors, options = {}) {
   return renderBarsIcon(stats, size, pickers[mode] || pickWorstProvider, colors, options);
 }
 
+function liveTokenRateTrayLayout() {
+  return {
+    version: trayLayoutApi.VERSION,
+    items: [
+      trayLayoutApi.createTrayLayoutItem('appIcon', { idFactory: () => 'live-rate-app-icon' }),
+      trayLayoutApi.createTrayLayoutItem('liveTokenRate', { idFactory: () => 'live-rate-value' })
+    ]
+  };
+}
+
 function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
+  if (mode === 'liveTokenRate') {
+    return renderCustomTrayLayout(
+      options.stats || state.stats || statsForTrayComposer(),
+      liveTokenRateTrayLayout(),
+      size,
+      colors,
+      options
+    );
+  }
   if (mode === 'custom') {
     return renderCustomTrayLayout(
       options.stats || state.stats || statsForTrayComposer(),
@@ -14328,6 +14794,7 @@ function createTrayComposer(surface) {
     label: t,
     onLayoutChange: (nextLayout, { commit }) => {
       state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
+      observeDisplayLiveTokenRates(state.stats);
       if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
       else {
         renderFloatingBubbleContent();

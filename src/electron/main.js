@@ -223,6 +223,13 @@ const {
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const {
+  HUB_RESPONSE_HEADER,
+  HUB_RESPONSE_MINIMAL,
+  HUB_STREAM_HEADER,
+  HUB_STREAM_VERSION,
+  applyFreshnessEvent
+} = require('../shared/hubProtocol');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -303,6 +310,11 @@ const {
   usageConfigFingerprint,
   usageConfigFromSettings
 } = require('./runtimeConfig');
+const {
+  CUSTOM_SCAN_CLIENT_IDS,
+  customScanPathLimitError,
+  normalizeCustomScanPaths
+} = require('../shared/customScanPaths');
 const {
   canRefreshUsageRuntime,
   drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
@@ -388,7 +400,7 @@ const CSP_HEADER = [
   "form-action 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
@@ -511,6 +523,7 @@ function defaultSettings() {
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
+    customScanPaths: {},
     clientDisplayOrder: '',
     hiddenClients: '',
     pinnedClients: '',
@@ -520,7 +533,7 @@ function defaultSettings() {
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     showHomeLimitBars: false,
     showHomeLimitProviderNames: false,
-    projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
+    projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
@@ -1954,9 +1967,9 @@ function migrateViewDisplayOrder(value) {
   return hasKnownView ? normalizeViewDisplayOrder(value, DEFAULT_VIEW_LIST).join(',') : '';
 }
 
-function normalizeTrayContent(value, fallback = 'tokens') {
+function normalizeTrayContent(value, fallback = 'tokens', allowedValues = TRAY_CONTENT_VALUES) {
   const v = String(value || '').trim();
-  return TRAY_CONTENT_VALUES.has(v) ? v : fallback;
+  return allowedValues.has(v) ? v : fallback;
 }
 
 function normalizeHubMode(value, fallback = 'local') {
@@ -2415,6 +2428,7 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     merged.clients = clientsCsvForSetting(merged.clients);
+    merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
     // A missing settings file is the only reliable fresh-install signal: a
     // missing limitProviders field also occurs when an existing installation
     // upgrades, where changing the user's effective defaults would be wrong.
@@ -3246,7 +3260,11 @@ async function postToHub(summary) {
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
     summary,
     logger: (message) => console.log(`[sync] ${message}`)
   });
@@ -4270,7 +4288,8 @@ function updateTrayDisplay() {
   // A renderer-generated icon is cached in the main process. Only reuse it
   // while the current stats still have quota text; otherwise it can outlive
   // the provider data that generated it.
-  const trayImageMode = mode === 'limitsAllSessions' && Boolean(limitText) && providerTrayIcons[mode];
+  const trayImageMode = (mode === 'limitsAllSessions' && Boolean(limitText) || mode === 'liveTokenRate')
+    && providerTrayIcons[mode];
   const customImageMode = mode === 'custom' && providerTrayIcons.custom;
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
@@ -4448,7 +4467,11 @@ async function startStatsStream(options = {}) {
   sseAbortController = controller;
   try {
     const response = await fetch(url, {
-      headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      headers: {
+        accept: 'text/event-stream',
+        [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
+        ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      },
       signal: controller.signal
     });
     if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
@@ -4473,10 +4496,20 @@ async function startStatsStream(options = {}) {
         buffer = buffer.slice(idx + 2);
         let parsed = parseSseChunk(chunk);
         if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) {
+          if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
             setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+            updateDiscordRpcDisplay(displayStats);
+          } else if (parsed.event === 'freshness') {
+            const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
+            if (!refreshed) continue;
+            setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
+            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+            parsed = {
+              event: 'stats',
+              data: { type: 'stats', reason: parsed.data?.reason || 'ingest', stats: displayStats, at: parsed.data?.at }
+            };
             updateDiscordRpcDisplay(displayStats);
           }
           sendPush(parsed, { widgetProducerOwner });
@@ -6661,6 +6694,11 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+    if (patch.customScanPaths !== undefined) {
+      const limitError = customScanPathLimitError(patch.customScanPaths);
+      if (limitError) throw new Error(limitError);
+      normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
+    }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
@@ -6702,6 +6740,7 @@ app.whenReady().then(() => {
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
+      customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
@@ -7111,6 +7150,7 @@ app.whenReady().then(() => {
     // So the diagnostics panel can print ~/… instead of the user's account name.
     homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
+    customScanClientIds: CUSTOM_SCAN_CLIENT_IDS,
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState(),
     systemDarkUi: currentSystemDarkTrayUi()
@@ -7143,8 +7183,8 @@ app.whenReady().then(() => {
   const clientSourceIpcHandlers = createClientSourceIpcHandlers({
     knownClients: KNOWN_CLIENTS,
     trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
-    visibleDiagnosticRoots,
-    clientDiagnosticRoots,
+    visibleDiagnosticRoots: (clients) => visibleDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    clientDiagnosticRoots: (clients) => clientDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
     revealClientSyncLock: () => {
@@ -7161,6 +7201,19 @@ app.whenReady().then(() => {
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  ipcMain.handle('usage:pickCustomScanPath', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!CUSTOM_SCAN_CLIENT_IDS.includes(client)) return { ok: false, error: 'unsupported-client' };
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      defaultPath: app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    const dir = result.filePaths[0];
+    const normalized = normalizeCustomScanPaths({ [client]: [dir] });
+    if (!normalized[client]?.[0]) return { ok: false, error: 'unsupported-path' };
+    return { ok: true, dir: normalized[client][0] };
+  });
   // The renderer sends a client id, never a path: anything it could send would
   // otherwise become an arbitrary filesystem open.
   ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
