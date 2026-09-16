@@ -1,0 +1,34 @@
+{
+  "release": "noah-20260916.1",
+  "status": "deployed",
+  "sourceCommit": "0c25e5091e4d66c9a6dbf01b41a8b4e57a5ccefc",
+  "components": {
+    "web": "0c25e5091e4d66c9a6dbf01b41a8b4e57a5ccefc",
+    "agent": "0c25e5091e4d66c9a6dbf01b41a8b4e57a5ccefc",
+    "hub": "0c25e5091e4d66c9a6dbf01b41a8b4e57a5ccefc"
+  },
+  "activatedAt": "2026-09-16T12:00:57+08:00",
+  "configuration": {
+    "browserAuthentication": "OIDC native Web with PKCE; unchanged",
+    "protectedConfiguration": "external env paths retained",
+    "rollback": "previous release directories retained"
+  },
+  "verification": {
+    "tokscale": "4.17.0; npm-installed linux-x64 binary",
+    "rootTests": "4237 passed, 0 failed, 3 skipped",
+    "vendoredTokscaleFixture": "passed",
+    "tokscaleClientCoverage": "28 effective client ids passed",
+    "tokscaleReleaseMappings": "9 passed",
+    "iacCheckMode": "passed",
+    "iacApply": "ok=11 changed=3 failed=0; ok=18 changed=5 failed=0",
+    "iacSecondApply": "changed=0 failed=0",
+    "runtimeCwds": "Hub, agent and Web point to this release",
+    "agentUpload": "post reached local Hub after restart",
+    "localHubStatsAnonymous": 401,
+    "publicRoot": 303,
+    "publicAnonymousStats": 401,
+    "pocketIdDiscovery": 200,
+    "oidcRedirect": "correct client_id/callback and PKCE code flow"
+  },
+  "scope": "Only Token Monitor Hub, agent and Web were restarted; OpenClaw Gateway and infrastructure were not changed. Tokscale #993 and Hermes #92151 remain unreplaced local compatibility risks."
+}
