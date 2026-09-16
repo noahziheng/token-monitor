@@ -10,8 +10,66 @@ const {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
+  stripSessionTextFromDeviceRecord,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
+
+test('session normalization preserves bounded titles and recognized background-review metadata', () => {
+  const period = normalizePeriod({ sessions: {
+    'codex:review': {
+      client: 'codex',
+      sessionId: 'review',
+      totalTokens: 10,
+      title: '  Review   the change  ',
+      sessionKind: 'background-review'
+    },
+    'codex:unknown': {
+      client: 'codex',
+      sessionId: 'unknown',
+      totalTokens: 5,
+      title: 'x'.repeat(200),
+      sessionKind: 'untrusted-kind'
+    }
+  } });
+
+  assert.equal(period.sessions['codex:review'].title, 'Review the change');
+  assert.equal(period.sessions['codex:review'].sessionKind, 'background-review');
+  assert.equal(period.sessions['codex:unknown'].title.length, 160);
+  assert.equal(period.sessions['codex:unknown'].sessionKind, '');
+});
+
+test('Hub ingress projection strips session text without mutating local records', () => {
+  const record = {
+    deviceId: 'macbook',
+    today: { sessions: {
+      'codex:s1': {
+        client: 'codex', sessionId: 's1', totalTokens: 10,
+        title: 'Private title', preview: 'Private preview', first_user_message: 'Private prompt',
+        sessionKind: 'background-review'
+      }
+    } },
+    periods: { month: { sessions: {
+      'claude:s2': {
+        client: 'claude', sessionId: 's2', totalTokens: 20,
+        sessionTitle: 'Private title', customTitle: 'Private custom title', aiTitle: 'Private AI title'
+      }
+    } } }
+  };
+
+  const stripped = stripSessionTextFromDeviceRecord(record);
+
+  assert.equal(record.today.sessions['codex:s1'].title, 'Private title');
+  assert.equal(stripped.today.sessions['codex:s1'].sessionKind, 'background-review');
+  assert.deepEqual(
+    Object.keys(stripped.today.sessions['codex:s1']).sort(),
+    ['client', 'sessionId', 'sessionKind', 'totalTokens'].sort()
+  );
+  assert.deepEqual(
+    Object.keys(stripped.periods.month.sessions['claude:s2']).sort(),
+    ['client', 'sessionId', 'totalTokens'].sort()
+  );
+});
 
 function recordWithLimits(extra = {}) {
   return {
@@ -356,6 +414,73 @@ test('mergeDeviceRecord allows the same runtime to clear Copilot limits', () => 
   const merged = mergeDeviceRecord(existing, incoming);
   assert.equal(merged.limits.providers.length, 1);
   assert.equal(merged.limits.providers[0].provider, 'copilot');
+  assert.equal(merged.limits.providers[0].status, 'notConfigured');
+});
+
+test('mergeDeviceRecord keeps widget Factory limits when a headless agent reports no local API key', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'factory',
+          accountKey: 'sha256:factory-user',
+          accountLabel: 'Factory Pro',
+          status: 'ok',
+          source: 'api',
+          updatedAt: '2026-06-26T08:00:00.000Z',
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }]
+        }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'headless-agent',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+  assert.equal(merged.limits.providers[0].accountKey, 'sha256:factory-user');
+});
+
+test('mergeDeviceRecord allows the same runtime to clear Factory limits', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'factory', accountKey: 'sha256:factory-user', status: 'ok', source: 'api', updatedAt: '2026-06-26T08:00:00.000Z', windows: [] }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'electron-widget',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
   assert.equal(merged.limits.providers[0].status, 'notConfigured');
 });
 

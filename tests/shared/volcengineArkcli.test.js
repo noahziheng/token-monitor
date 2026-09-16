@@ -199,3 +199,33 @@ test('npm launcher resolves to the native binary so cancellation targets the que
     TOKEN_MONITOR_ARKCLI_COMMAND: path.join(alias, 'scripts', 'run.js')
   }, 'linux', 'x64'), canonicalBinary);
 });
+test('known npm install locations survive Electron-style truncated PATH', (t) => {
+  const fs = require('node:fs'); const path = require('node:path'); const os = require('node:os');
+  const { resolveArkcliCommand } = require('../../src/shared/providers/volcengine/arkcli');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-arkcli-known-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const targetPlatform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform];
+  const targetArch = { x64: 'amd64', arm64: 'arm64' }[process.arch];
+  const env = process.platform === 'win32'
+    ? { APPDATA: root, PATH: 'C:\\Windows\\System32' }
+    : { HOME: root, PATH: '/usr/bin:/bin' };
+  const shimDir = process.platform === 'win32'
+    ? path.join(root, 'npm')
+    : path.join(root, '.npm-global', 'bin');
+  const pkg = process.platform === 'win32'
+    ? path.join(shimDir, 'node_modules', '@volcengine', 'ark-cli')
+    : path.join(root, '.npm-global', 'lib', 'node_modules', '@volcengine', 'ark-cli');
+  const launcher = path.join(pkg, 'scripts', 'run.js');
+  const binary = path.join(pkg, 'bin', `arkcli-${targetPlatform}-${targetArch}${process.platform === 'win32' ? '.exe' : ''}`);
+  fs.mkdirSync(path.dirname(launcher), { recursive: true });
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(launcher, '');
+  fs.writeFileSync(binary, '');
+  fs.mkdirSync(shimDir, { recursive: true });
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(shimDir, 'arkcli.cmd'), '@echo off\r\n');
+  } else {
+    fs.symlinkSync(launcher, path.join(shimDir, 'arkcli'));
+  }
+  assert.equal(resolveArkcliCommand(env), fs.realpathSync(binary));
+});

@@ -4,6 +4,12 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeLimitProvider } = require('../../limits/core');
+const {
+  envValue,
+  pathApiForPlatform,
+  pathDelimiterForPlatform,
+  uniqueStrings
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { abortError } = require('../../probeDeadline');
 const { createSubprocessTermination } = require('../../subprocessTermination');
@@ -23,20 +29,41 @@ function probeError(status = 'unavailable') {
 // its installed native executable, also avoiding .cmd shell shims on Windows.
 function resolveArkcliCommand(env, platform = process.platform, arch = process.arch) {
   const command = env.TOKEN_MONITOR_ARKCLI_COMMAND || 'arkcli';
+  const pathApi = pathApiForPlatform(platform);
+  const suffixes = platform === 'win32' ? ['', '.exe', '.cmd'] : [''];
   const paths = command.includes('/') || command.includes('\\')
-    ? [command] : String(env.PATH || env.Path || '').split(path.delimiter)
-      .flatMap((dir) => (platform === 'win32' ? ['', '.exe', '.cmd'] : [''])
-        .map((suffix) => path.join(dir, command + suffix)));
+    ? [command]
+    : uniqueStrings([
+      ...String(envValue(env, 'PATH') || '')
+        .split(pathDelimiterForPlatform(platform))
+        .filter(Boolean),
+      ...(platform === 'win32'
+        ? [
+          envValue(env, 'APPDATA') && pathApi.join(envValue(env, 'APPDATA'), 'npm'),
+          envValue(env, 'LOCALAPPDATA') && pathApi.join(envValue(env, 'LOCALAPPDATA'), 'npm'),
+          envValue(env, 'LOCALAPPDATA') && pathApi.join(envValue(env, 'LOCALAPPDATA'), 'pnpm'),
+          envValue(env, 'USERPROFILE') && pathApi.join(envValue(env, 'USERPROFILE'), '.npm-global')
+        ]
+        : [
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+          '/usr/bin',
+          '/bin',
+          env.HOME && path.join(env.HOME, '.npm-global', 'bin'),
+          env.HOME && path.join(env.HOME, '.bun', 'bin'),
+          env.HOME && path.join(env.HOME, '.local', 'bin')
+        ])
+    ]).flatMap((dir) => suffixes.map((suffix) => pathApi.join(dir, command + suffix)));
   const targetPlatform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[platform];
   const targetArch = { x64: 'amd64', arm64: 'arm64' }[arch];
   for (const candidate of paths) {
     try {
       const real = fs.realpathSync(candidate);
-      const roots = [path.resolve(path.dirname(real), '..'),
-        path.join(path.dirname(candidate), 'node_modules', '@volcengine', 'ark-cli')];
-      for (const root of roots) {
-        if (path.basename(root) !== 'ark-cli') continue;
-        const binary = path.join(root, 'bin', `arkcli-${targetPlatform}-${targetArch}${platform === 'win32' ? '.exe' : ''}`);
+      const roots = [pathApi.resolve(pathApi.dirname(real), '..'),
+        pathApi.join(pathApi.dirname(candidate), 'node_modules', '@volcengine', 'ark-cli')];
+      for (const root of uniqueStrings(roots)) {
+        if (pathApi.basename(root) !== 'ark-cli') continue;
+        const binary = pathApi.join(root, 'bin', `arkcli-${targetPlatform}-${targetArch}${platform === 'win32' ? '.exe' : ''}`);
         if (fs.existsSync(binary)) return binary;
       }
       if (!/\.(cmd|bat)$/i.test(real)) return real;

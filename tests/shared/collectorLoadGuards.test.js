@@ -179,6 +179,9 @@ test('watchIgnoreMatcher bounds OpenClaw to its per-agent usage sources', () => 
     path.join(root, 'main', 'session-sqlite-import-archive'),
     path.join(root, 'main', 'agent', 'codex-home', 'sessions', '2026', '09', '07'),
     path.join(root, 'main', 'agent', 'codex-home', 'archived_sessions'),
+    path.join(root, 'main', 'agent', 'cli-auth', 'codex', 'default', 'sessions', '2026', '08', '30'),
+    path.join(root, 'main', 'agent', 'cli-auth', 'codex', 'default', 'archived_sessions'),
+    path.join(root, 'main', 'agent', 'cli-auth', 'other', 'default', 'sessions'),
     path.join(root, 'main', 'workspace', 'node_modules', 'package', 'cache'),
     path.join(root, 'main', 'logs')
   ]);
@@ -208,7 +211,23 @@ test('watchIgnoreMatcher bounds OpenClaw to its per-agent usage sources', () => 
       path.join(agents, 'main', 'agent', 'codex-home', 'sessions'),
       path.join(agents, 'main', 'agent', 'codex-home', 'sessions', '2026', '09', '07', 'rollout.jsonl'),
       path.join(agents, 'main', 'agent', 'codex-home', 'archived_sessions'),
-      path.join(agents, 'main', 'agent', 'codex-home', 'archived_sessions', 'rollout.jsonl')
+      path.join(agents, 'main', 'agent', 'codex-home', 'archived_sessions', 'rollout.jsonl'),
+      // Legacy per-profile CLI homes hold Codex rollouts OpenClaw owns too. The
+      // `codex` and `<profile>` levels are kept so a login added after startup
+      // still reports.
+      path.join(agents, 'main', 'agent', 'cli-auth'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'sessions'),
+      path.join(
+        agents, 'main', 'agent', 'cli-auth', 'codex', 'default',
+        'sessions', '2026', '08', '30', 'rollout.jsonl'
+      ),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'archived_sessions'),
+      path.join(
+        agents, 'main', 'agent', 'cli-auth', 'codex', 'default',
+        'archived_sessions', 'rollout.jsonl'
+      )
     ];
     for (const target of kept) assert.equal(ignored(target), false, target);
 
@@ -223,7 +242,15 @@ test('watchIgnoreMatcher bounds OpenClaw to its per-agent usage sources', () => 
       path.join(agents, 'main', 'agent', 'incognito-openclaw-agent.sqlite'),
       path.join(agents, 'main', 'agent', 'codex-home', 'history.jsonl'),
       path.join(agents, 'main', 'agent', 'codex-home', 'tmp'),
-      path.join(agents, 'main', 'agent', 'codex-home', 'tmp', 'rollout.jsonl')
+      path.join(agents, 'main', 'agent', 'codex-home', 'tmp', 'rollout.jsonl'),
+      // `cli-auth/<other>` is an authentication profile, not a Codex home, and
+      // `history.jsonl` beside the session dirs is not a rollout.
+      path.join(agents, 'main', 'agent', 'cli-auth', 'other'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'other', 'default'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'other', 'default', 'sessions'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'history.jsonl'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'tmp'),
+      path.join(agents, 'main', 'agent', 'cli-auth', 'codex', 'default', 'tmp', 'rollout.jsonl')
     ];
     for (const target of pruned) assert.equal(ignored(target), true, target);
   } finally {
@@ -2038,7 +2065,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     path.join('Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent'),
     path.join('.local', 'share', 'kiro-cli'),
     path.join('.codebuddy', 'projects'),
-    path.join('.workbuddy', 'projects')
+    path.join('.workbuddy', 'projects'),
+    path.join('.workbuddy-ai', 'projects')
   ]);
   fs.writeFileSync(path.join(tmp, '.local', 'share', 'kilo', 'kilo.db'), '');
   const originalHomedir = os.homedir;
@@ -2069,6 +2097,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     // collector code, not this cross-platform test.
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
+    assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
     assert.deepEqual(clientDataDirPresence('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
       pi: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
@@ -4324,7 +4353,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
   }
 });
 
-// tokscale resolves opencode, zed and micode through `PathRoot::XdgData`
+// tokscale resolves opencode, zed, micode and amp through `PathRoot::XdgData`
 // (clients.rs) and the CodeBuddy extension logs through `dirs::data_local_dir()`,
 // which is the XDG data home on Linux. Kiro's CLI database is the deliberate
 // exception: tokscale spells it as a home-relative literal, so following XDG
@@ -4332,7 +4361,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
 test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () => {
   const tmp = withTmpHome([]);
   const xdg = path.join(tmp, 'custom-xdg');
-  for (const dir of ['opencode', 'zed/threads', 'mimocode', 'CodeBuddyExtension/Logs']) {
+  for (const dir of ['opencode', 'zed/threads', 'mimocode', 'amp/threads', 'CodeBuddyExtension/Logs']) {
     fs.mkdirSync(path.join(xdg, dir), { recursive: true });
   }
   fs.mkdirSync(path.join(tmp, '.local', 'share', 'kiro-cli'), { recursive: true });
@@ -4342,10 +4371,11 @@ test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () =>
   process.env.XDG_DATA_HOME = xdg;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode,codebuddy,kiro');
+    const roots = watchPathsForClients('opencode,zed,micode,amp,codebuddy,kiro');
     assert.ok(roots.includes(path.join(xdg, 'opencode')));
     assert.ok(roots.includes(path.join(xdg, 'zed', 'threads')));
     assert.ok(roots.includes(path.join(xdg, 'mimocode')));
+    assert.ok(roots.includes(path.join(xdg, 'amp', 'threads')));
     if (process.platform !== 'win32' && process.platform !== 'darwin') {
       assert.ok(roots.includes(path.join(xdg, 'CodeBuddyExtension', 'Logs')));
     }
@@ -4367,16 +4397,18 @@ test('an unset XDG_DATA_HOME falls back to the .local/share roots', () => {
   const tmp = withTmpHome([
     path.join('.local', 'share', 'opencode'),
     path.join('.local', 'share', 'zed', 'threads'),
-    path.join('.local', 'share', 'mimocode')
+    path.join('.local', 'share', 'mimocode'),
+    path.join('.local', 'share', 'amp', 'threads')
   ]);
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode');
+    const roots = watchPathsForClients('opencode,zed,micode,amp');
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'opencode')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'mimocode')));
+    assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'amp', 'threads')));
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
@@ -4546,6 +4578,73 @@ test('Tokscale headless capture roots are optional only while they are the defau
     assert.equal(named.dir, path.join(tmp, 'capture', 'codex'));
     assert.equal(named.exists, false);
     assert.equal(named.optional, undefined);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('custom Tokscale scan paths stay visible and use recursive extra-root watcher semantics', () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { clientSourceChecks, visibleDiagnosticRoots, watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const custom = path.join(tmp, 'relocated', 'codex');
+    const options = { customScanPaths: { codex: [custom] } };
+
+    const missing = visibleDiagnosticRoots('codex', options).codex.find((root) => root.custom === true);
+    assert.deepEqual(missing, {
+      id: 'custom-scan-path',
+      dir: custom,
+      custom: true,
+      exists: false
+    });
+    assert.deepEqual(clientSourceChecks('codex', options).codex.at(-1), {
+      id: 'custom-scan-path',
+      exists: false
+    });
+    assert.equal(watchPathsForClients('codex', options).includes(custom), false);
+
+    fs.mkdirSync(custom, { recursive: true });
+    assert.equal(watchPathsForClients('codex', options).includes(custom), true);
+
+    const openclawOptions = { customScanPaths: { openclaw: [custom] } };
+    const ignored = watchIgnoreMatcher('openclaw', openclawOptions);
+    assert.equal(ignored(path.join(custom, 'direct.json')), false);
+    assert.equal(ignored(path.join(custom, 'nested')), false);
+    assert.equal(ignored(path.join(custom, 'nested', 'session.json')), false);
+
+    const copilotCustom = path.join(tmp, '.copilot', 'imported-sessions');
+    fs.mkdirSync(copilotCustom, { recursive: true });
+    const copilotIgnored = watchIgnoreMatcher('copilot', {
+      customScanPaths: { copilot: [copilotCustom] }
+    });
+    assert.equal(copilotIgnored(path.join(tmp, '.copilot', 'cache')), true);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'direct.jsonl')), false);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'nested')), false);
+    assert.equal(copilotIgnored(path.join(copilotCustom, 'nested', 'session.jsonl')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('custom Antigravity roots remain watchable without watching its self-sync cache', () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    const { watchPathsForClients } = freshCollector();
+    const customAntigravity = path.join(tmp, 'relocated', 'antigravity');
+    fs.mkdirSync(customAntigravity, { recursive: true });
+
+    const roots = watchPathsForClients('antigravity', {
+      customScanPaths: { antigravity: [customAntigravity] }
+    });
+    assert.deepEqual(roots, [customAntigravity]);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
