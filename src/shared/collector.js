@@ -537,7 +537,7 @@ function runTokscale({
   const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY);
-  const runArgs = (filter, grouping) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
+  const runArgs = (filter, grouping = groupBy()) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,

@@ -446,6 +446,60 @@ test('collectUsageOnce falls back to plain session grouping when the binary reje
   }
 });
 
+test('local SQLite compatibility scan supplies a grouping to its Codex rescans', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-local-usage-'));
+  const codexHome = path.join(tmp, '.openclaw', 'agents', 'main', 'agent', 'codex-home');
+  fs.mkdirSync(path.join(codexHome, 'sessions'), { recursive: true });
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const originalHomedir = os.homedir;
+  const originalLocalSqlite = process.env.TOKEN_MONITOR_LOCAL_SQLITE_USAGE;
+  const calls = [];
+  process.env.TOKEN_MONITOR_LOCAL_SQLITE_USAGE = '1';
+  os.homedir = () => tmp;
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    await collectUsageOnce({
+      clients: 'openclaw',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      historyEnabled: false,
+      homeDir: tmp,
+      sessionMetadataDeps: { env: {} }
+    });
+
+    assert.equal(calls.length, 6, 'three normal scans plus one OpenClaw Codex compatibility scan per period');
+    assert.ok(calls.every((args) => args[args.indexOf('--group-by') + 1]), 'every scan must pass a grouping');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    os.homedir = originalHomedir;
+    if (originalLocalSqlite === undefined) delete process.env.TOKEN_MONITOR_LOCAL_SQLITE_USAGE;
+    else process.env.TOKEN_MONITOR_LOCAL_SQLITE_USAGE = originalLocalSqlite;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('resetting the capability cache lets the workspace grouping be tried again', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
