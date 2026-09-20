@@ -208,3 +208,76 @@ test('agent coalesces usage and limits together without slowing local updates', 
   assert.equal(delivered[1].limits.updatedAt, 'new-limits');
   runtime.stop();
 });
+
+// The Hub must not replace a newer throttled agent observation with an older
+// desktop observation (or its notConfigured row) between agent uploads.
+test('throttled agent keeps its newer quotas eligible through the upload interval', async () => {
+  const { aggregateDevices } = require('../../src/shared/usage');
+  const harness = runtimeHarness();
+  const delivered = [];
+  const observedAt = '2026-09-20T13:00:00.000Z';
+  const runtime = runAgent({
+    envelope: { deviceId: 'device-1' },
+    uploadIntervalMs: 600000,
+    deliver: async (record) => delivered.push(record)
+  }, harness.deps);
+  try {
+    harness.limitsUpdate({ updatedAt: observedAt, refreshMs: 300000, providers: [
+      { provider: 'deepseek', status: 'ok', updatedAt: observedAt, windows: [] },
+      { provider: 'volcengine', status: 'ok', updatedAt: observedAt, windows: [] }
+    ] });
+    harness.usageUpdate({ ...usageSummary(), updatedAt: observedAt });
+    await runtime.flush();
+    const agent = { ...delivered[0], receivedAt: '2026-09-20T13:05:00.000Z' };
+    const desktop = {
+      ...usageSummary(), deviceId: 'desktop', syncUploadIntervalMs: 1800000,
+      receivedAt: '2026-09-20T12:46:00.000Z',
+      limits: { refreshMs: 300000, providers: [
+        { provider: 'deepseek', status: 'ok', updatedAt: '2026-09-20T12:46:00.000Z', windows: [] },
+        { provider: 'volcengine', status: 'notConfigured', updatedAt: '2026-09-20T12:46:00.000Z', windows: [] }
+      ] }
+    };
+    const stats = aggregateDevices([agent, desktop], 600000, Date.parse('2026-09-20T13:11:00.000Z'));
+    for (const provider of ['deepseek', 'volcengine']) {
+      const row = stats.limits.providers.find((entry) => entry.provider === provider);
+      assert.equal(row.sourceDeviceId, 'device-1', provider);
+      assert.equal(row.status, 'ok');
+      assert.equal(row.stale, false);
+    }
+    assert.equal(delivered[0].syncUploadIntervalMs, 600000);
+  } finally {
+    runtime.stop();
+  }
+});
+
+for (const [configured, expected] of [[0, 0], [undefined, 0], ['1200000', 1200000], [1800000, 1800000], [-1, 0], [12345, 0]]) {
+  test(`agent advertises normalized upload interval for ${configured}`, async () => {
+    const harness = runtimeHarness();
+    const delivered = [];
+    const runtime = runAgent({
+      envelope: { deviceId: 'device-1', syncUploadIntervalMs: 1800000 },
+      uploadIntervalMs: configured,
+      deliver: async (record) => delivered.push(record)
+    }, harness.deps);
+    try {
+      harness.usageUpdate(usageSummary());
+      await runtime.flush();
+      assert.equal(delivered[0].syncUploadIntervalMs, expected);
+    } finally {
+      runtime.stop();
+    }
+  });
+}
+
+test('one-shot agent does not advertise throttling that it bypasses', async () => {
+  const harness = runtimeHarness();
+  const delivered = [];
+  const running = runAgentOnce({
+    envelope: { deviceId: 'device-1' }, uploadIntervalMs: 600000,
+    deliver: async (record) => delivered.push(record)
+  }, harness.deps);
+  harness.usageUpdate(usageSummary());
+  harness.limitsRefresh.resolve();
+  await running;
+  assert.equal(delivered[0].syncUploadIntervalMs, 0);
+});

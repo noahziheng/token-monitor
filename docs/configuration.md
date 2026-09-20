@@ -36,7 +36,8 @@ The agent and hub have no UI. Configure them with a `.env` file in the project r
 TOKEN_MONITOR_HUB_URL=               # required in sync mode — Worker URL or http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # shared secret; must match the hub
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
-TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
+TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # widget sync cadence: 0/live, 600000/10min, 1200000/20min, 1800000/30min
+TOKEN_MONITOR_UPLOAD_INTERVAL_MS=0   # headless cadence: same intervals; invalid values use 0; --once bypasses throttling
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults on; 0 stops collecting project metadata
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend history
@@ -68,3 +69,5 @@ One-shot run (collect once and exit — useful for cron / launchd):
 ```bash
 npm run agent -- --clients=claude,codex,opencode --once
 ```
+
+The downstream headless upload throttle coalesces usage and limits updates without changing collection frequency. Every device record advertises the effective `syncUploadIntervalMs` so Hub freshness accounts for the intentional upload delay. One-shot runs advertise `0`, matching their immediate delivery.

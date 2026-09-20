@@ -1,0 +1,17 @@
+{
+  "release": "noah-20260920.1-rc1",
+  "status": "verified-candidate",
+  "sourceParent": "e48097fa8911514771fb9d9b767e910d6c91b8d2",
+  "scope": "Agent only: report effective syncUploadIntervalMs; Hub and Web remain on sourceParent.",
+  "verification": {
+    "root": "npm run verify: 4485 passed, 0 failed, 2 skipped; lint passed",
+    "agent": "15 passed; regression first failed selecting older desktop observations",
+    "vendor": "ensure:tokscale and verify-vendored-tokscale passed"
+  },
+  "runtimeSourceSha256": "34536af10f3e60d7a54d234ed7e08efd31c5f1bbaa16987cadbb2f0ff0275475",
+  "rollout": "Pending; separate external rollout receipt will tie exact commit and IaC revision to observed ingest.",
+  "knownLimitations": [
+    "Porta still uses a fixed 15-minute freshness threshold; slow desktop-only providers may still show aged observations."
+  ],
+  "rollback": "Keep previous release; restore only agent pin through token-monitor-runtime.yml without rolling back data."
+}

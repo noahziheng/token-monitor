@@ -2,19 +2,22 @@
 
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createOrderedSink } = require('../shared/orderedSink');
+const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 
 function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {
   const makeDeviceRuntime = deps.createDeviceRuntime || createDeviceRuntime;
   const makeOrderedSink = deps.createOrderedSink || createOrderedSink;
+  const uploadIntervalMs = normalizeSyncUploadIntervalMs(overrides.uploadIntervalMs ?? options.uploadIntervalMs);
   const sink = overrides.sink === undefined
     ? makeOrderedSink({
         send: options.deliver,
-        minIntervalMs: options.uploadIntervalMs
+        minIntervalMs: uploadIntervalMs
       })
     : overrides.sink;
 
   return makeDeviceRuntime({
-    envelope: options.envelope,
+    // Advertise the same interval used by the sink so Hub freshness accounts for throttling.
+    envelope: { ...options.envelope, syncUploadIntervalMs: uploadIntervalMs },
     limitsOptions: options.limitsOptions,
     usageOptions: overrides.usageOptions || options.usageOptions,
     transformUsage: options.transformUsage,
@@ -53,6 +56,7 @@ async function runAgentOnce(options = {}, deps = {}) {
   const dryRun = options.dryRun === true;
   const runtime = createAgentDeviceRuntime(options, deps, {
     usageOptions,
+    uploadIntervalMs: 0,
     sink: dryRun ? null : (deps.createOrderedSink || createOrderedSink)({ send: options.deliver }),
     onRecord(record, meta) {
       latestRecord = record;
